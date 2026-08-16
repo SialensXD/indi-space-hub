@@ -1,0 +1,45 @@
+body {
+  background-color: #1a1a24;
+  color: #e0e0e0;
+  font-family: 'Courier New', Courier, monospace; /* Ретро-шрифт */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+
+.container {
+  text-align: center;
+  background: #252538;
+  padding: 30px;
+  border: 3px solid #6c5ce7;
+  border-radius: 8px;
+  box-shadow: 0 0 15px rgba(108, 92, 231, 0.4);
+}
+
+.btn {
+  display: inline-block;
+  margin-top: 20px;
+  padding: 12px 24px;
+  background-color: #6c5ce7;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
+/* Секретный пиксель в углу */
+#secret-pixel {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  cursor: pointer;
+  opacity: 0.3;
+  transition: 0.3s;
+}
+
+#secret-pixel:hover {
+  opacity: 1;
+  transform: scale(1.3);
+}
