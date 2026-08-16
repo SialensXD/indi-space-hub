@@ -1,10 +1,16 @@
 import os
+import sys
 import sqlite3
+import logging
+import asyncio
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+# Включаем системные логи, чтобы видеть каждый шаг в панели Render
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
 TOKEN = "8883956292:AAF0wZaZJVdw6JSQ3UaPk6E4TMOE86FUqCs"
 WEBHOOK_PATH = "/webhook"
@@ -28,7 +34,7 @@ def init_db():
     """)
     conn.commit()
     conn.close()
-    print("База данных успешно инициализирована", flush=True)
+    logging.info("База данных успешно инициализирована.")
 
 def get_user(user_id: int):
     conn = sqlite3.connect(DB_NAME)
@@ -101,42 +107,54 @@ async def callbacks_num(callback: types.CallbackQuery):
         _, role_changes = user_data
         if role_changes >= 1 and not is_admin:
             await callback.answer(
-                "❌ Вы уже исчерпали лимит смены роли! Обратитесь к админу @sialens_xd",
+                "❌ Лимит смены роли исчерпан! Обратитесь к админу @sialens_xd",
                 show_alert=True
             )
             return
 
     save_user_role(user_id, username, role_name)
     admin_note = " 🛡️ *(Админ-доступ)*" if is_admin and user_data and user_data[1] >= 1 else ""
-    await callback.message.edit_text(f"Успешно! Твоя роль теперь: {role_name}{admin_note}", parse_mode="Markdown")
+    await callback.message.edit_text(f"Успешно! Твоя роль: {role_name}{admin_note}", parse_mode="Markdown")
     await callback.answer("Роль сохранена!")
-
-# --- РУЧКА ПРОВЕРКИ ЗДОРОВЬЯ СЕРВЕРА (HEALTH CHECK) ---
+    # --- СЕРВЕР И ФОНОВЫЕ ЗАДАЧИ ---
 async def health_check(request):
-    return web.Response(text="Bot status: OK", status=200)
+    return web.Response(text="Bot is alive and running!", status=200)
+
+async def set_webhook_background(bot: Bot, webhook_url: str):
+    """Фоновая задача: устанавливаем вебхук не блокируя старт сервера."""
+    try:
+        logging.info(f"Стучимся в Telegram для установки вебхука: {webhook_url}")
+        await bot.set_webhook(webhook_url, drop_pending_updates=True)
+        logging.info("✅ Вебхук успешно установлен!")
+    except Exception as e:
+        logging.error(f"❌ Ошибка вебхука: {e}")
+
 async def on_startup(bot: Bot):
     init_db()
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
     if base_url:
         webhook_url = f"{base_url}{WEBHOOK_PATH}"
-        print(f"Ставим вебхук на: {webhook_url}", flush=True)
-        await bot.set_webhook(webhook_url, drop_pending_updates=True)
+        # Вызываем установку вебхука как независимую задачу
+        asyncio.create_task(set_webhook_background(bot, webhook_url))
+    else:
+        logging.warning("⚠️ RENDER_EXTERNAL_URL не найден. Бот запущен без вебхука?")
 
 def main():
     dp.startup.register(on_startup)
     app = web.Application()
 
-    # Главная страница для Render и UptimeRobot
+    # Роуты
     app.router.add_get('/', health_check)
-
-    # Вебхук для Telegram
+    
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
 
     port = int(os.environ.get("PORT", 10000))
-    print(f"Сервер запускается на порту {port}...", flush=True)
+    logging.info(f"🚀 Моментальный запуск сервера на порту {port}...")
+    
+    # Запускаем сам сервер
     web.run_app(app, host="0.0.0.0", port=port)
 
-if __name__ == "main":
+if __name__ == "__main__":
     main()
