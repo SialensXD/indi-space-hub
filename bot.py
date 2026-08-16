@@ -1,15 +1,15 @@
-import asyncio
-import logging
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 TOKEN = "8883956292:AAF0wZaZJVdw6JSQ3UaPk6E4TMOE86FUqCs"
+WEBHOOK_PATH = "/webhook"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-# Временное хранилище ролей в памяти
 user_roles = {}
 
 def get_roles_keyboard():
@@ -23,7 +23,7 @@ def get_roles_keyboard():
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Выбери свою роль во флуде Indie Space:",
+        f"Привет, {message.from_user.first_name}! Выбери свою роль во вселенной Indie Space:",
         reply_markup=get_roles_keyboard()
     )
 
@@ -47,11 +47,30 @@ async def callbacks_num(callback: types.CallbackQuery):
     await callback.message.edit_text(f"Успешно! Твоя роль теперь: {role_name}", parse_mode="Markdown")
     await callback.answer("Роль сохранена!")
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    # Сбрасываем старые накопившиеся апдейты и запускаем поллинг
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+async def on_startup(bot: Bot):
+    # Render сам подставляет свой URL в эту переменную
+    base_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if base_url:
+        webhook_url = f"{base_url}{WEBHOOK_PATH}"
+        print(f"Устанавливаем вебхук Telegram: {webhook_url}", flush=True)
+        await bot.set_webhook(webhook_url, drop_pending_updates=True)
 
-if __name__ == "main":
-    asyncio.run(main())
+def main():
+    dp.startup.register(on_startup)
+    app = web.Application()
+
+    # Подключаем обработчик запросов от Telegram
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    # Слушаем порт, который требует Render
+    port = int(os.environ.get("PORT", 10000))
+    print(f"Запуск сервера на порту {port}...", flush=True)
+    web.run_app(app, host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    main()
