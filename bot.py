@@ -1,5 +1,7 @@
 import asyncio
 import os
+import sys
+import traceback
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -11,22 +13,22 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 user_roles = {}
 
-# Мини-сервер для Render
+# Мини-сервер для проверки «живучести» Render
 async def handle_health(request):
     return web.Response(text="Bot is running!")
 
 def get_roles_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🗡️ Рыцарь", callback_data="role_knight")
-    builder.button(text="💡 Хранитель", callback_data="role_keeper")
-    builder.button(text="💀 Тень", callback_data="role_shadow")
+    builder.button(text="💡 Нико", callback_data="role_keeper")
+    builder.button(text="💀 Санс", callback_data="role_shadow")
     builder.adjust(1)
     return builder.as_markup()
 
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Выбери свою роль во вселенной Indie Space:",
+        f"Привет, {message.from_user.first_name}! Выбери свою роль во флуде Indie Space:",
         reply_markup=get_roles_keyboard()
     )
 
@@ -42,27 +44,39 @@ async def callbacks_num(callback: types.CallbackQuery):
     if callback.data == "role_knight":
         role_name = "🗡️ Рыцарь"
     elif callback.data == "role_keeper":
-        role_name = "💡 Хранитель"
+        role_name = "💡 Нико"
     elif callback.data == "role_shadow":
-        role_name = "💀 Тень"
+        role_name = "💀 Санс"
 
     user_roles[callback.from_user.id] = role_name
     await callback.message.edit_text(f"Успешно! Твоя роль теперь: {role_name}", parse_mode="Markdown")
     await callback.answer("Роль сохранена!")
 
-async def main():
-    # Запрашиваем динамический порт у системы Render
+async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
-
     app = web.Application()
     app.router.add_get("/", handle_health)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    print(f"Сервер открыл порт {port}!", flush=True)
 
-    print("Бот Indie Space запущен!")
-    await dp.start_polling(bot)
+async def main():
+    try:
+        print("Инициализация сервисов...", flush=True)
+        # 1. Сначала запускаем веб-сервер, чтобы Render сразу увидел порт
+        await start_web_server()
+        
+        # 2. Очищаем прошлые подвисшие сессии Telegram
+        await bot.delete_webhook(drop_pending_updates=True)
+        
+        print("Бот Indie Space успешно запущен!", flush=True)
+        # 3. Запускаем слушать команды
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"Критическая ошибка при запуске: {e}", flush=True)
+        traceback.print_exc()
 
 if __name__ == "main":
     asyncio.run(main())
