@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -8,10 +9,58 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 TOKEN = "8883956292:AAF0wZaZJVdw6JSQ3UaPk6E4TMOE86FUqCs"
 WEBHOOK_PATH = "/webhook"
 
+# Список админов (без символа @)
+ADMIN_USERNAMES = ["sialens_xd"]
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-user_roles = {}
 
+# --- БАЗА ДАННЫХ ---
+DB_NAME = "bot_data.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            role TEXT,
+            role_changes INTEGER DEFAULT 0
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def get_user(user_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT role, role_changes FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row  # Возвращает (role, role_changes) или None
+
+def save_user_role(user_id: int, username: str, new_role: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    user = get_user(user_id)
+    
+    if user is None:
+        # Первичный выбор (бесплатный)
+        cursor.execute(
+            "INSERT INTO users (user_id, username, role, role_changes) VALUES (?, ?, ?, 0)",
+            (user_id, username, new_role)
+        )
+    else:
+        # Повторная смена (увеличиваем счетчик)
+        cursor.execute(
+            "UPDATE users SET role = ?, role_changes = role_changes + 1, username = ? WHERE user_id = ?",
+            (new_role, username, user_id)
+        )
+    conn.commit()
+    conn.close()
+
+# --- КЛАВИАТУРЫ И ХЕНДЛЕРЫ ---
 def get_roles_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🗡️ Рыцарь", callback_data="role_knight")
@@ -29,48 +78,66 @@ async def cmd_role(message: types.Message):
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
-    user_id = message.from_user.id
-    role = user_roles.get(user_id, "Без роли (выбери через /role)")
-    await message.answer(f"👤 Профиль {message.from_user.first_name}\n🎭 Роль: {role}", parse_mode="Markdown")
+    user_data = get_user(message.from_user.id)
+    if user_data:
+        role, changes = user_data
+        status = f"🎭 Роль: {role}\n🔄 Изменений роли: {changes}/1"
+    else:
+        status = "🎭 Роль: Без роли (выбери через /role)"
+        
+    await message.answer(f"👤 Профиль {message.from_user.first_name}\n{status}", parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
-    role_name = ""
-    if callback.data == "role_knight":
-        role_name = "🗡️ Рыцарь"
-    elif callback.data == "role_niko":
-        role_name = "💡 Нико"
-    elif callback.data == "role_sans":
-        role_name = "💀 Санс"
+    user_id = callback.from_user.id
+    username = callback.from_user.username or ""
+    is_admin = username.lower() in [adm.lower() for adm in ADMIN_USERNAMES]
+    
+    # Определяем название роли
+    roles_map = {
+        "role_knight": "🗡️ Рыцарь",
+        "role_niko": "💡 Нико",
+        "role_sans": "💀 Санс"
+    }
+    role_name = roles_map.get(callback.data, "Неизвестно")
 
-    user_roles[callback.from_user.id] = role_name
-    await callback.message.edit_text(f"Успешно! Твоя роль теперь: {role_name}", parse_mode="Markdown")
+    user_data = get_user(user_id)
+
+    if user_data is not None:
+        current_role, role_changes = user_data
+        
+        # Запрет, если сменил 1 раз и НЕ админ
+        if role_changes >= 1 and not is_admin:
+            await callback.answer(
+                "❌ Вы уже исчерпали лимит самостоятельной смены роли! Обратитесь к админу @sialens_xd",
+                show_alert=True
+            )
+            return
+
+    # Сохраняем роль
+    save_user_role(user_id, username, role_name)
+    
+    admin_note = " 🛡️ *(Права Администратора)*" if is_admin and user_data and user_data[1] >= 1 else ""
+    await callback.message.edit_text(f"Успешно! Твоя роль теперь: {role_name}{admin_note}", parse_mode="Markdown")
     await callback.answer("Роль сохранена!")
-
+    # --- СЕРВЕР ---
 async def on_startup(bot: Bot):
-    # Render сам подставляет свой URL в эту переменную
+    init_db()
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
     if base_url:
         webhook_url = f"{base_url}{WEBHOOK_PATH}"
-        print(f"Устанавливаем вебхук Telegram: {webhook_url}", flush=True)
         await bot.set_webhook(webhook_url, drop_pending_updates=True)
 
 def main():
     dp.startup.register(on_startup)
     app = web.Application()
 
-    # Подключаем обработчик запросов от Telegram
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-    )
+    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
 
-    # Слушаем порт, который требует Render
     port = int(os.environ.get("PORT", 10000))
-    print(f"Запуск сервера на порту {port}...", flush=True)
     web.run_app(app, host="0.0.0.0", port=port)
 
-if __name__ == "__main__":
+if __name__ == "main":
     main()
