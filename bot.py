@@ -64,5 +64,5 @@ async def main():
     print("Бот Indie Space запущен!")
     await dp.start_polling(bot)
 
-if name == "main":
+if __name__ == "main":
     asyncio.run(main())
