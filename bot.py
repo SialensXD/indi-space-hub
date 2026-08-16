@@ -1,21 +1,16 @@
-import asyncio
 import os
-import sys
-import traceback
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 TOKEN = "8883956292:AAF0wZaZJVdw6JSQ3UaPk6E4TMOE86FUqCs"
+WEBHOOK_PATH = "/webhook"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 user_roles = {}
-
-# Мини-сервер для проверки «живучести» Render
-async def handle_health(request):
-    return web.Response(text="Bot is running!")
 
 def get_roles_keyboard():
     builder = InlineKeyboardBuilder()
@@ -52,31 +47,40 @@ async def callbacks_num(callback: types.CallbackQuery):
     await callback.message.edit_text(f"Успешно! Твоя роль теперь: {role_name}", parse_mode="Markdown")
     await callback.answer("Роль сохранена!")
 
-async def start_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    app = web.Application()
-    app.router.add_get("/", handle_health)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"Сервер открыл порт {port}!", flush=True)
+async def on_startup(bot: Bot):
+    # Render автоматически подставит сюда твой домен (напр., https://твое-название.onrender.com)
+    base_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not base_url:
+        print("Внимание: RENDER_EXTERNAL_URL не найден. Бот запущен локально?", flush=True)
+        return
 
-async def main():
-    try:
-        print("Инициализация сервисов...", flush=True)
-        # 1. Сначала запускаем веб-сервер, чтобы Render сразу увидел порт
-        await start_web_server()
-        
-        # 2. Очищаем прошлые подвисшие сессии Telegram
-        await bot.delete_webhook(drop_pending_updates=True)
-        
-        print("Бот Indie Space успешно запущен!", flush=True)
-        # 3. Запускаем слушать команды
-        await dp.start_polling(bot)
-    except Exception as e:
-        print(f"Критическая ошибка при запуске: {e}", flush=True)
-        traceback.print_exc()
+    webhook_url = f"{base_url}{WEBHOOK_PATH}"
+    print(f"Регистрируем вебхук в Telegram: {webhook_url}", flush=True)
+    
+    # Говорим Телеграму, куда слать апдейты
+    await bot.set_webhook(webhook_url, drop_pending_updates=True)
+
+def main():
+    # Регистрируем функцию, которая сработает при старте сервера
+    dp.startup.register(on_startup)
+
+    # Создаем честный веб-сервер
+    app = web.Application()
+    
+    # Привязываем наш aiogram-диспетчер к веб-серверу
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    # Получаем порт от системы
+    port = int(os.environ.get("PORT", 10000))
+    print(f"Запуск честного веб-сервера на порту {port}...", flush=True)
+    
+    # Запускаем приложение (это блокирующий вызов, скрипт не завершится)
+    web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "main":
-    asyncio.run(main())
+    main()
