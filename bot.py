@@ -38,7 +38,7 @@ CHARACTERS = {
     5: {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},  
     6: {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
     # МОЯ АДМИНСКАЯ РОЛЬ
-    999: {"hp": 999, "max_hp": 999, "atk": 999, "type": "god"} 
+    999: {"hp": 9999, "max_hp": 9999, "atk": 9999, "type": "god"} 
 }
 
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
@@ -507,9 +507,9 @@ async def cb_fight(callback: types.CallbackQuery):
                 await callback.answer(f"⏳ Навык перезаряжается! Осталось ходов: {attacker['cd']}", show_alert=True)
                 return
             
-            r_type = attacker['type'] # СНАЧАЛА ДОСТАЕМ ТИП!
+            r_type = attacker['type'] 
             
-            if r_type == "god": # ТЕПЕРЬ НАЧИНАЕМ ПРОВЕРКИ
+            if r_type == "god": 
                 attacker['cd'] = 1
                 dmg = int(defender['max_hp'] * 0.99)
                 defender['hp'] -= dmg
