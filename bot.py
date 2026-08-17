@@ -1,15 +1,20 @@
 print("=== СТАРТ БОТА ===", flush=True)
 import os
 import sys
+import time
 import logging
 import asyncio
 import asyncpg
+from typing import Callable, Dict, Any, Awaitable
 from datetime import datetime, timezone, timedelta
+
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
+from aiogram.types import TelegramObject
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
@@ -22,6 +27,29 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 db_pool = None
 
+# --- АНТИ-СПАМ ФИЛЬТР ---
+class AntiSpamMiddleware(BaseMiddleware):
+    def init(self, limit: float = 1.0):
+        self.limit = limit
+        self.users = {}
+
+    async def call(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        user = data.get("event_from_user")
+        if user:
+            now = time.time()
+            last = self.users.get(user.id, 0)
+            if now - last < self.limit:
+                if isinstance(event, types.CallbackQuery):
+                    await event.answer("Эу, притормози! Не кликай так часто 🖐", show_alert=True)
+                return
+            self.users[user.id] = now
+        return await handler(event, data)
+
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
 async def init_db():
     global db_pool
@@ -32,13 +60,21 @@ async def init_db():
     dsn = DATABASE_URL.replace("postgres://", "postgresql://")
     try:
         db_pool = await asyncpg.create_pool(dsn=dsn)
-        logging.info("✅ Успешное подключение к PostgreSQL (Supabase)!")
+        logging.info("✅ Успешное подключение к БД!")
     except Exception as e:
         logging.error(f"❌ Ошибка подключения к БД: {e}")
 
 async def get_roles():
     async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT id, name FROM roles ORDER BY id ASC")
+        # Достаем роли и смотри, кто их занял
+        return await conn.fetch(
+            """
+            SELECT r.id, r.name, 
+                   (SELECT user_id FROM users WHERE role_id = r.id LIMIT 1) as occupied_by
+            FROM roles r
+            ORDER BY r.id ASC
+            """
+        )
 
 async def get_user(user_id: int):
     async with db_pool.acquire() as conn:
@@ -67,19 +103,25 @@ async def save_user_role(user_id: int, username: str, role_id: int):
             )
 
 # --- КЛАВИАТУРЫ И ХЕНДЛЕРЫ ---
-async def get_roles_keyboard():
+async def get_roles_keyboard(current_user_id: int):
     roles = await get_roles()
     builder = InlineKeyboardBuilder()
     for role in roles:
-        builder.button(text=role['name'], callback_data=f"role_{role['id']}")
+        if role['occupied_by'] and role['occupied_by'] != current_user_id:
+            btn_text = f"🔒 {role['name']} (Занято)"
+        elif role['occupied_by'] == current_user_id:
+            btn_text = f"✅ {role['name']} (Твой перс)"
+        else:
+            btn_text = f"✨ {role['name']}"
+            
+        builder.button(text=btn_text, callback_data=f"role_{role['id']}")
     builder.adjust(1)
     return builder.as_markup()
-
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
-    kb = await get_roles_keyboard()
+    kb = await get_roles_keyboard(message.from_user.id)
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Выбери свою роль во вселенной Indie Space:",
+        f"Здорово, {message.from_user.first_name}! Выбирай себе персонажа (занятые помечены 🔒):",
         reply_markup=kb
     )
 
@@ -91,13 +133,13 @@ async def cmd_profile(message: types.Message):
         credits_val = user_data['credits'] if user_data['credits'] is not None else 100
         xp_val = user_data['xp'] if user_data['xp'] is not None else 0
         status = (
-            f"🎭 Роль: {role_str}\n"
-            f"💳 Кредиты: {credits_val} 💰\n"
+            f"🎭 Персонаж: {role_str}\n"
+            f"💳 Бабосики: {credits_val} 💰\n"
             f"⭐ Опыт: {xp_val} XP\n"
-            f"🔄 Изменений роли: {user_data['role_changes']}/1"
+            f"🔄 Смен роли оставлено: {1 - user_data['role_changes']}/1"
         )
     else:
-        status = "🎭 Роль: Без роли (выбери через /role)"
+        status = "🎭 Персонаж: Не выбран (выбери через /role)"
         
     await message.answer(f"👤 Профиль {message.from_user.first_name}\n\n{status}", parse_mode="Markdown")
 
@@ -106,6 +148,7 @@ async def cmd_daily(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     user_data = await get_user(user_id)
+
     if not user_data:
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -121,7 +164,7 @@ async def cmd_daily(message: types.Message):
         remaining = timedelta(hours=24) - (now - last_daily)
         hours, remainder = divmod(int(remaining.total_seconds()), 3600)
         minutes, _ = divmod(remainder, 60)
-        await message.answer(f"⏳ Ты уже забирал награду! Приходи через {hours} ч. {minutes} мин.")
+        await message.answer(f"⏳ Рано еще! Заходи через {hours} ч. {minutes} мин.")
         return
 
     async with db_pool.acquire() as conn:
@@ -136,7 +179,7 @@ async def cmd_daily(message: types.Message):
             now, user_id
         )
 
-    await message.answer("🎁 Ежедневная награда получена!\n\n+250 Кредитов 💰\n+50 XP ⭐", parse_mode="Markdown")
+    await message.answer("🎁 Халява заехала!\n\n+250 Кредитов 💰\n+50 XP ⭐", parse_mode="Markdown")
 
 @dp.message(Command("reset"))
 async def cmd_reset(message: types.Message):
@@ -146,7 +189,7 @@ async def cmd_reset(message: types.Message):
 
     args = message.text.split()
     if len(args) != 2:
-        await message.answer("⚠️ Использование: /reset @username", parse_mode="Markdown")
+        await message.answer("⚠️ Пиши так: /reset @username", parse_mode="Markdown")
         return
         
     target_username = args[1].replace("@", "")
@@ -158,9 +201,9 @@ async def cmd_reset(message: types.Message):
         )
         
     if result == "UPDATE 1":
-        await message.answer(f"✅ Лимит для @{target_username} сброшен!")
+        await message.answer(f"✅ Обнулил лимит для @{target_username}!")
     else:
-        await message.answer(f"❌ Пользователь @{target_username} не найден в базе.")
+        await message.answer(f"❌ Нет такого чела в базе.")
 
 @dp.message(Command("send"))
 async def cmd_broadcast(message: types.Message):
@@ -170,17 +213,16 @@ async def cmd_broadcast(message: types.Message):
 
     text_to_send = message.text.replace("/send", "").strip()
     if not text_to_send:
-        await message.answer("⚠️ Использование: /send Твой текст", parse_mode="Markdown")
+        await message.answer("⚠️ Пиши так: /send Твой текст", parse_mode="Markdown")
         return
 
     async with db_pool.acquire() as conn:
         users = await conn.fetch("SELECT user_id FROM users")
     
     if not users:
-        await message.answer("В базе пока нет пользователей.")
+        await message.answer("База пустая, некому слать.")
         return
-
-    await message.answer(f"🚀 Начинаю рассылку для {len(users)} пользователей...")
+    await message.answer(f"🚀 Запускаю рассылку на {len(users)} челов...")
     
     success_count = 0
     fail_count = 0
@@ -195,7 +237,7 @@ async def cmd_broadcast(message: types.Message):
             fail_count += 1
             
     await message.answer(
-        f"✅ Рассылка завершена!\nУспешно: {success_count}\nОшибок: {fail_count}"
+        f"✅ Готово!\nДошло: {success_count}\nОтвалилось: {fail_count}"
     )
 
 @dp.callback_query(F.data.startswith("role_"))
@@ -207,21 +249,36 @@ async def callbacks_num(callback: types.CallbackQuery):
 
     user_data = await get_user(user_id)
 
+    # 1. Проверка лимита смен (для не-админов)
     if user_data is not None:
         if user_data['role_changes'] >= 1 and not is_admin:
             await callback.answer(
-                "❌ Лимит смены роли исчерпан! Обратитесь к админу @sialens_xd",
+                "❌ Всё, свой выбор ты уже сделал! Пиши админу @sialens_xd",
                 show_alert=True
             )
             return
-        await save_user_role(user_id, username, role_id)
+
+    # 2. Проверка: не занят ли перс другим челом?
+    async with db_pool.acquire() as conn:
+        occupied_by = await conn.fetchval(
+            "SELECT user_id FROM users WHERE role_id = $1 AND user_id != $2",
+            role_id, user_id
+        )
+        if occupied_by:
+            await callback.answer("🔒 Увы! Этого персонажа уже забрали!", show_alert=True)
+            kb = await get_roles_keyboard(user_id)
+            await callback.message.edit_reply_markup(reply_markup=kb)
+            return
+
+    # 3. Сохранение роли
+    await save_user_role(user_id, username, role_id)
     
     updated_user = await get_user(user_id)
     role_name = updated_user['role_name'] if updated_user else "Выбрана"
     
-    admin_note = " 🛡 *(Админ-доступ)*" if is_admin and user_data and user_data['role_changes'] >= 1 else ""
-    await callback.message.edit_text(f"Успешно! Твоя роль: {role_name}{admin_note}", parse_mode="Markdown")
-    await callback.answer("Роль сохранена!")
+    admin_note = " 🛡 *(Админка)*" if is_admin and user_data and user_data['role_changes'] >= 1 else ""
+    await callback.message.edit_text(f"Ты забронировал персонажа: {role_name}{admin_note}", parse_mode="Markdown")
+    await callback.answer("Персонаж за тобой!")
 
 # --- СЕРВЕР И ФОНОВЫЕ ЗАДАЧИ ---
 async def health_check(request):
@@ -243,6 +300,9 @@ async def on_startup(bot: Bot):
         asyncio.create_task(set_webhook_background(bot, webhook_url))
 
 def main():
+    dp.message.middleware(AntiSpamMiddleware(limit=1.0))
+    dp.callback_query.middleware(AntiSpamMiddleware(limit=1.0))
+
     dp.startup.register(on_startup)
     app = web.Application()
 
