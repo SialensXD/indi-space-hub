@@ -29,7 +29,7 @@ db_pool = None
 
 # --- АНТИ-СПАМ ФИЛЬТР ---
 class AntiSpamMiddleware(BaseMiddleware):
-    def init(self, limit: float = 1.0):
+    def __init__(self, limit: float = 1.0):
         self.limit = limit
         self.users = {}
 
@@ -45,7 +45,7 @@ class AntiSpamMiddleware(BaseMiddleware):
             last = self.users.get(user.id, 0)
             if now - last < self.limit:
                 if isinstance(event, types.CallbackQuery):
-                    await event.answer("Эу, притормози! Не кликай так часто 🖐", show_alert=True)
+                    await event.answer("Гой, притормози! Не тапай так часто 🖐", show_alert=True)
                 return
             self.users[user.id] = now
         return await handler(event, data)
@@ -179,7 +179,7 @@ async def cmd_daily(message: types.Message):
             now, user_id
         )
 
-    await message.answer("🎁 Халява заехала!\n\n+250 Кредитов 💰\n+50 XP ⭐", parse_mode="Markdown")
+    await message.answer("🎁 Вот и твой ежедневный бонус!\n\n+250 Кредитов 💰\n+50 XP ⭐", parse_mode="Markdown")
 
 @dp.message(Command("reset"))
 async def cmd_reset(message: types.Message):
@@ -222,7 +222,7 @@ async def cmd_broadcast(message: types.Message):
     if not users:
         await message.answer("База пустая, некому слать.")
         return
-    await message.answer(f"🚀 Запускаю рассылку на {len(users)} челов...")
+    await message.answer(f"🚀 Запускаю рассылку на {len(users)} юзеров...")
     
     success_count = 0
     fail_count = 0
@@ -265,7 +265,7 @@ async def callbacks_num(callback: types.CallbackQuery):
             role_id, user_id
         )
         if occupied_by:
-            await callback.answer("🔒 Увы! Этого персонажа уже забрали!", show_alert=True)
+            await callback.answer("🔒 Увы и ах! Этого персонажа уже забрали!", show_alert=True)
             kb = await get_roles_keyboard(user_id)
             await callback.message.edit_reply_markup(reply_markup=kb)
             return
