@@ -29,14 +29,20 @@ import random
 active_duels = {}
 duel_invites = {}
 
-# БАЗОВЫЕ СТАТЫ ПЕРСОНАЖЕЙ (памятка: ключи - названия ролей из базы в нижнем регистре)
+# БАЗОВЫЕ СТАТЫ ПЕРСОНАЖЕЙ (защита от разных языков)
 CHARACTERS = {
     "v1": {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"},
+    "в1": {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, # кириллица
     "v2": {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},
-    "санс": {"hp": 50, "max_hp": 50, "atk": 0, "type": "karma"},
+    "в2": {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"}, # кириллица
+    "санс": {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},
+    "sans": {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},
     "нико": {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},
+    "niko": {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},
     "минос прайм": {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
-    "полый рыцарь": {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"}
+    "minos prime": {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
+    "полый рыцарь": {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},
+    "hollow knight": {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"}
 }
 
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
@@ -369,8 +375,8 @@ async def cb_duel_accept(callback: types.CallbackQuery):
             await callback.message.edit_text("❌ Ошибка: кто-то из игроков пропал из бд.")
             return
             
-        p1_role = p1_data['role_name'].lower() if p1_data['role_name'] else ""
-        p2_role = p2_data['role_name'].lower() if p2_data['role_name'] else ""
+        p1_role = p1_data['role_name'].lower().strip() if p1_data['role_name'] else ""
+        p2_role = p2_data['role_name'].lower().strip() if p2_data['role_name'] else ""
         
         def_stats = {"hp": 100, "max_hp": 100, "atk": 15, "type": "basic"}
         c1 = CHARACTERS.get(p1_role, def_stats).copy()
@@ -414,7 +420,7 @@ async def cb_fight(callback: types.CallbackQuery):
         return
         
     if duel['turn'] != user_id:
-        await callback.answer("⏳ Сейчас не твой ход!", show_alert=True)
+        await callback.answer("⏳ Сейчас не твой ход, ишак!", show_alert=True)
         return
         
     # 2. Определяем, кто бьет, а кто получает
@@ -430,6 +436,8 @@ async def cb_fight(callback: types.CallbackQuery):
     if action == "atk":
         # Базовый урон + легкий рандом (-2..+3 урона) для живости
         dmg = attacker['atk'] + random.randint(-2, 3)
+        
+        dmg = max(0, attacker['atk'] + random.randint(-2, 3))
         
         # Пассивка Санса: 45% шанс увернуться
         if defender['type'] == 'karma' and random.random() < 0.45:
