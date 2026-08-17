@@ -31,12 +31,14 @@ duel_invites = {}
 
 # БАЗОВЫЕ СТАТЫ ПЕРСОНАЖЕЙ (привязаны к role_id из БД)
 CHARACTERS = {
-    1: {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},   # Knight (Vessel)
-    2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},     # Niko
-    3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      # Sans
-    4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, # V1 Supreme Machine
-    5: {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},  # V2 Peacetime Machine
-    6: {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"}  # Minos Prime
+    1: {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},   
+    2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},     
+    3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      
+    4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, 
+    5: {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},  
+    6: {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
+    # МОЯ АДМИНСКАЯ РОЛЬ
+    999: {"hp": 999, "max_hp": 999, "atk": 999, "type": "god"} 
 }
 
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
@@ -309,6 +311,23 @@ async def callbacks_num(callback: types.CallbackQuery):
     role_id = int(callback.data.split("_")[1])
     is_admin = username.lower() in [a.lower() for a in ADMIN_USERNAMES]
 
+    # --- КАПКАН НА РОЛЬ БОГА (999) ---
+    ADMIN_ID = 7857165309
+    
+    if role_id == 999:
+        if user_id != ADMIN_ID:
+            mockery = [
+                "🤡 Губу раскатал! Эта роль только для моего Создателя.",
+                "⚡️ Твоё смертное тело не выдержит эту силу. Выбери что-то попроще, гой.",
+                "🤣 ПХАХХАХА, не-а. Иди играй за Санса, мамин хакер.",
+                "🛑 ОШИБКА ДОСТУПА. Уровень прав: ПЕШКА. Требуется: БОГ."
+            ]
+            await callback.answer(random.choice(mockery), show_alert=True)
+            return # Обрываем код, роль не выдается
+        else:
+            await callback.answer("Добро пожаловать в режим Бога, Создатель. 👑", show_alert=True)
+    # ---------------------------------
+
     user_data = await get_user(user_id)
 
     if user_data and user_data['role_id'] == role_id:
@@ -488,8 +507,22 @@ async def cb_fight(callback: types.CallbackQuery):
                 await callback.answer(f"⏳ Навык перезаряжается! Осталось ходов: {attacker['cd']}", show_alert=True)
                 return
             
-            r_type = attacker['type']
-            if r_type == "berserk": # Минос
+            r_type = attacker['type'] # СНАЧАЛА ДОСТАЕМ ТИП!
+            
+            if r_type == "god": # ТЕПЕРЬ НАЧИНАЕМ ПРОВЕРКИ
+                attacker['cd'] = 1
+                dmg = int(defender['max_hp'] * 0.99)
+                defender['hp'] -= dmg
+                
+                phrases = [
+                    f"🤧 <b>{attacker['name']}</b> просто чихнул в сторону <b>{defender['name']}</b>, и того стерло в пыль на {dmg} урона!",
+                    f"🧠 <b>{attacker['name']}</b> случайно подумал о <b>{defender['name']}</b>, и его клетки начали распадаться на атомы (-{dmg} HP).",
+                    f"💅 <b>{attacker['name']}</b> лениво щелкнул пальцами. Половина чата выжила, а <b>{defender['name']}</b> потерял {dmg} HP.",
+                    f"🔨 <b>{attacker['name']}</b> прописал бан-хаммером по лицу. <b>{defender['name']}</b> чудом выжил (-{dmg} HP)."
+                ]
+                log_msg = random.choice(phrases)
+                
+            elif r_type == "berserk": # Минос
                 attacker['cd'] = 3
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
