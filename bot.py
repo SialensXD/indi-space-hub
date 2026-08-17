@@ -216,46 +216,50 @@ duel_invites = {} # Для хранения непринятых вызовов
 
 @dp.message(Command("duel"))
 async def cmd_duel(message: types.Message):
-    user_id = message.from_user.id
-    
-    # Проверяем, есть ли у инициатора персонаж
-    user_data = await get_user(user_id)
-    if not user_data or not user_data['role_id']:
-        await message.answer("❌ Сначала выбери персонажа через /role!", parse_mode="Markdown")
-        return
+    try:
+        user_id = message.from_user.id
+        
+        # Проверяем, есть ли у инициатора персонаж
+        user_data = await get_user(user_id)
+        if not user_data or not user_data['role_id']:
+            await message.answer("❌ Сначала выбери персонажа через /role!")
+            return
 
-    # Проверяем, ответил ли игрок реплаем на сообщение соперника
-    if not message.reply_to_message or message.reply_to_message.from_user.is_bot:
-        await message.answer("⚠️ Чтобы вызвать на дуэль, ответь командой /duel на сообщение противника в чате!", parse_mode="Markdown")
-        return
+        # Проверяем, ответил ли игрок реплаем на сообщение соперника
+        if not message.reply_to_message or message.reply_to_message.from_user.is_bot:
+            await message.answer("⚠️ Чтобы вызвать на дуэль, ответь командой /duel на сообщение противника в чате!")
+            return
 
-    target_id = message.reply_to_message.from_user.id
-    target_name = message.reply_to_message.from_user.first_name
+        target_id = message.reply_to_message.from_user.id
+        target_name = message.reply_to_message.from_user.first_name
 
-    if target_id == user_id:
-        await message.answer("Ты не можешь вызвать сам себя на дуэль, шизофрения отменяется.")
-        return
+        if target_id == user_id:
+            await message.answer("Ты не можешь вызвать сам себя на дуэль, шизофреник!")
+            return
 
-    # Проверяем персонажа противника
-    target_data = await get_user(target_id)
-    if not target_data or not target_data['role_id']:
-        await message.answer(f"❌ У {target_name} не выбран персонаж! Пусть сначала выберет через /role.")
-        return
+        # Проверяем персонажа противника
+        target_data = await get_user(target_id)
+        if not target_data or not target_data['role_id']:
+            await message.answer(f"❌ У {target_name} не выбран персонаж! Пусть сначала выберет через /role.")
+            return
 
-# Создаем инлайн-кнопки принятия вызова
-    builder = InlineKeyboardBuilder()
-    builder.button(text="⚔️ Принять вызов", callback_data=f"duel_accept_{user_id}_{target_id}")
-    builder.button(text="❌ Отказаться", callback_data=f"duel_decline_{target_id}")
-    builder.button(text="🛑 Отозвать", callback_data=f"duel_cancel_{user_id}") # Новая кнопка
-    builder.adjust(2, 1) # Две кнопки в первом ряду, одна (Отмена) во втором
+        # Создаем инлайн-кнопки принятия вызова
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⚔️ Принять вызов", callback_data=f"duel_accept_{user_id}_{target_id}")
+        builder.button(text="❌ Отказаться", callback_data=f"duel_decline_{target_id}")
+        builder.button(text="🛑 Отозвать", callback_data=f"duel_cancel_{user_id}")
+        builder.adjust(2, 1)
 
-    msg = await message.answer(
-        f"⚔️ Вызов на дуэль!\n\n"
-        f"@{message.from_user.username or message.from_user.first_name} вызывает {target_name} на смертный бой!\n"
-        f"Примешь вызов?",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
-    )
+        await message.answer(
+            f"⚔️ <b>Вызов на дуэль!</b>\n\n"
+            f"@{message.from_user.username or message.from_user.first_name} вызывает {target_name} на мортал комбат!\n"
+            f"Примешь вызов?",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        # Если код снова упадет, бот не промолчит, а выведет причину краша прямо в чат
+        await message.answer(f"🔧 Ого, тута системная ошибка: {e}, зовите Сиаленса!")
 
 # --- АДМИН КОМАНДЫ ---
 @dp.message(Command("reset"))
