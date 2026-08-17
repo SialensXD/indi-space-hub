@@ -389,6 +389,7 @@ async def cb_duel_accept(callback: types.CallbackQuery):
             "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False},
             "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False},
             "turn": turn_id,
+            "turn_count": 0,  
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
         }
         
@@ -464,7 +465,7 @@ async def cb_fight(callback: types.CallbackQuery):
         log_msg = f"🛡 {attacker['name']} уходит в глухую оборону."
         
     elif action == "skill":
-        log_msg = f"✨ {attacker['name']} пытается кастануть магию, но навыки еще в разработке!"
+        log_msg = f"✨ {attacker['name']} пытается что-то сделать, но забывает, что он - ослоеб!"
         
     elif action == "item":
         log_msg = f"🎒 {attacker['name']} лезет в рюкзак... а там пусто!"
@@ -490,14 +491,27 @@ async def cb_fight(callback: types.CallbackQuery):
         await callback.answer("Победа!")
         return
         
-    # 6. Передача хода, если никто не умер
+    # 6. Передача хода
     duel['turn'] = defender['id']
+    duel['turn_count'] += 1 # Увеличиваем счетчик ходов
     
-    # Перерисовываем интерфейс
     text = render_duel_text(duel_id)
     kb = get_duel_keyboard(duel_id)
     
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    # Если ход нечетный (например, 1, 3, 5) — значит сходил только первый игрок. Просто редактируем.
+    if duel['turn_count'] % 2 != 0:
+        try:
+            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except:
+            pass
+    # Если ход четный (2, 4, 6) — значит походили оба (раунд окончен). Пересоздаем внизу.
+    else:
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        
     await callback.answer()
 
 # --- СЕРВЕР ---
