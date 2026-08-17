@@ -393,6 +393,106 @@ async def cb_duel_accept(callback: types.CallbackQuery):
     text = render_duel_text(duel_id)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
+@dp.callback_query(F.data.startswith("fight_"))
+async def cb_fight(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    parts = callback.data.split("_")
+    action = parts[1] # atk, def, skill, item
+    duel_id = parts[2]
+    
+    # 1. Проверки на дурака
+    if duel_id not in active_duels:
+        await callback.answer("Этот бой уже завершен или не существует.", show_alert=True)
+        return
+        
+    duel = active_duels[duel_id]
+    
+    is_p1 = (user_id == duel['p1']['id'])
+    is_p2 = (user_id == duel['p2']['id'])
+    
+    if not (is_p1 or is_p2):
+        await callback.answer("Ты не участвуешь в этом бою, осел.", show_alert=True)
+        return
+        
+    if duel['turn'] != user_id:
+        await callback.answer("⏳ Сейчас не твой ход!", show_alert=True)
+        return
+        
+    # 2. Определяем, кто бьет, а кто получает
+    attacker = duel['p1'] if is_p1 else duel['p2']
+    defender = duel['p2'] if is_p1 else duel['p1']
+    
+    log_msg = ""
+    
+    # Сбрасываем блок атакующего (если он ставил его в свой прошлый ход)
+    attacker['block'] = False 
+    
+    # 3. Обработка действий
+    if action == "atk":
+        # Базовый урон + легкий рандом (-2..+3 урона) для живости
+        dmg = attacker['atk'] + random.randint(-2, 3)
+        
+        # Пассивка Санса: 45% шанс увернуться
+        if defender['type'] == 'karma' and random.random() < 0.45:
+            dmg = 0
+            log_msg = f"💨 {defender['name']} увернулся от атаки!"
+        else:
+            # Проверка блока (снижает урон на 40%)
+            if defender['block']:
+                dmg = int(dmg * 0.6)
+                log_msg = f"🛡 {defender['name']} заблокировал часть урона!\n"
+            
+            defender['hp'] -= dmg
+            log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
+            
+            # Пассивка V1: Вампиризм (хил 20% от урона)
+            if attacker['type'] == 'vampire' and dmg > 0:
+                heal = int(dmg * 0.2)
+                if heal < 1: heal = 1 # Минимум 1 хп хила
+                attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
+                log_msg += f" 🩸 Восстановил {heal} HP!"
+            
+    elif action == "def":
+        attacker['block'] = True
+        log_msg = f"🛡 {attacker['name']} уходит в глухую оборону."
+        
+    elif action == "skill":
+        log_msg = f"✨ {attacker['name']} пытается кастануть магию, но навыки еще в разработке!"
+        
+    elif action == "item":
+        log_msg = f"🎒 {attacker['name']} лезет в рюкзак... а там пусто!"
+
+    # 4. Обновляем лог боя
+    duel['log'] = log_msg
+    
+    # 5. Проверка на СМЕРТЬ (конец боя)
+    if defender['hp'] <= 0:
+        defender['hp'] = 0
+        text = render_duel_text(duel_id)
+        text += f"\n\n🏆 ПОБЕДИТЕЛЬ: {attacker['name']}!\n💀 Бой окончен."
+        
+        # Награда победителю (начислим в базу)
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET credits = credits + 100, xp = xp + 50 WHERE user_id = $1",
+                attacker['id']
+            )
+            
+        del active_duels[duel_id] # Удаляем бой из памяти
+        await callback.message.edit_text(text, parse_mode="Markdown")
+        await callback.answer("Победа!")
+        return
+        
+    # 6. Передача хода, если никто не умер
+    duel['turn'] = defender['id']
+    
+    # Перерисовываем интерфейс
+    text = render_duel_text(duel_id)
+    kb = get_duel_keyboard(duel_id)
+    
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
 # --- СЕРВЕР ---
 async def health_check(request):
     return web.Response(text="Bot is alive!", status=200)
