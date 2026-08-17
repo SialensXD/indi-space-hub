@@ -110,7 +110,7 @@ async def cmd_profile(message: types.Message):
         xp_val = user_data['xp'] or 0
         status = (
             f"🎭 Персонаж: {role_str}\n"
-            f"💳 Бабосики: {credits_val} 💰\n"
+            f"💳 Кредиты: {credits_val} 💰\n"
             f"⭐️ Опыт: {xp_val} XP\n"
             f"🔄 Смен роли: {1 - user_data['role_changes']}/1"
         )
