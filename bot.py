@@ -93,6 +93,33 @@ async def cmd_profile(message: types.Message):
         
     await message.answer(f"👤 Профиль {message.from_user.first_name}\n{status}", parse_mode="Markdown")
 
+@dp.message(Command("reset"))
+async def cmd_reset(message: types.Message):
+    # Проверяем, админ ли пишет
+    username = message.from_user.username or ""
+    if username.lower() not in [adm.lower() for adm in ADMIN_USERNAMES]:
+        return
+
+    # Разделяем текст сообщения, ожидаем формат: /reset @username
+    args = message.text.split()
+    if len(args) != 2:
+        await message.answer("⚠️ Использование: /reset @username", parse_mode="Markdown")
+        return
+        
+    target_username = args[1].replace("@", "")
+    
+    # Идем в базу и сбрасываем лимит этому юзеру
+    async with db_pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE users SET role_changes = 0 WHERE username = $1", 
+            target_username
+        )
+        
+    if result == "UPDATE 1":
+        await message.answer(f"✅ Лимит для @{target_username} сброшен! Он может снова выбрать роль.")
+    else:
+        await message.answer(f"❌ Пользователь @{target_username} не найден в базе. (Он должен хоть раз нажать кнопку роли).")
+
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
     user_id = callback.from_user.id
