@@ -432,22 +432,26 @@ async def cb_fight(callback: types.CallbackQuery):
         if action == "atk":
             dmg = max(0, attacker['atk'] + random.randint(-2, 3))
             
-            # Проверка на промах Миноса (15%) или ослепление от Санса (25%)
-            miss_chance = 0.15 if attacker['type'] == 'berserk' else 0.0
+            # Проверка на промах Миноса (20%) или ослепление от Санса (25%)
+            miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
             if attacker['blind']: miss_chance += 0.25
             
             if random.random() < miss_chance:
+                dmg = 0
                 log_msg = f"💨 {attacker['name']} промахивается по противнику!"
             # Пассивка Санса (45%) или активка Нико (60%)
             elif (defender['type'] == 'karma' and random.random() < 0.45) or (defender['niko_dodge'] and random.random() < 0.60):
                 defender['niko_dodge'] = False # Сбрасываем бафф Нико
+                dmg = 0
                 log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
-            # Активка V1 (Парирование 50%)
+                # Активка V1 (Парирование 50%)
             elif defender['parry']:
                 defender['parry'] = False # Срабатывает только на 1 удар
                 if random.random() < 0.5:
-                    dmg = 0
-                    log_msg = f"БАМ! {defender['name']} ПАРИРУЕТ атаку, избегая полностью урона!"
+                    reflected_dmg = dmg # Запоминаем летящий урон
+                    attacker['hp'] -= reflected_dmg # Возвращаем его атакующему
+                    dmg = 0 # V1 урон не получает
+                    log_msg = f"🪙 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно в {attacker['name']}!"
             
             if dmg > 0:
                 if defender['block']:
@@ -519,19 +523,25 @@ async def cb_fight(callback: types.CallbackQuery):
 
     duel['log'] = log_msg
     
-    # 4. Проверка на СМЕРТЬ
-    if defender['hp'] <= 0:
-        defender['hp'] = 0
+# 4. Проверка на СМЕРТЬ (умер либо защитник, либо атакующий от отдачи)
+    if defender['hp'] <= 0 or attacker['hp'] <= 0:
+        defender['hp'] = max(0, defender['hp'])
+        attacker['hp'] = max(0, attacker['hp'])
+        
+        # Определяем, кто выжил
+        winner = attacker if defender['hp'] <= 0 else defender
+        
         text = render_duel_text(duel_id)
-        text += f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {attacker['name']}!\n💀 Бой окончен."
+        text += f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n💀 Бой окончен."
         
         async with db_pool.acquire() as conn:
             await conn.execute(
                 "UPDATE users SET credits = credits + 100, xp = xp + 50 WHERE user_id = $1",
-                attacker['id']
+                winner['id']
             )
             
         del active_duels[duel_id]
+        
         try:
             await callback.message.delete()
         except:
@@ -539,7 +549,7 @@ async def cb_fight(callback: types.CallbackQuery):
         await callback.message.answer(text, parse_mode="HTML")
         await callback.answer("Победа!")
         return
-        
+    
     # 5. Передача хода
     duel['turn'] = defender['id']
     duel['turn_count'] += 1
