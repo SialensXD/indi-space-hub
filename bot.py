@@ -1,11 +1,9 @@
 print("=== СТАРТ БОТА ===", flush=True)
 import os
 import sys
-import time
 import logging
 import asyncio
 import asyncpg
-from typing import Callable, Dict, Any, Awaitable
 from datetime import datetime, timezone, timedelta
 
 from aiohttp import web
@@ -13,7 +11,6 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram.types import TelegramObject
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
@@ -36,7 +33,16 @@ async def init_db():
     dsn = DATABASE_URL.replace("postgres://", "postgresql://")
     try:
         db_pool = await asyncpg.create_pool(dsn=dsn)
-        logging.info("✅ Успешное подключение к БД!")
+        
+        # Авто-исправление структуры и чистка дубликатов
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                DELETE FROM users a USING users b 
+                WHERE a.ctid < b.ctid AND a.user_id = b.user_id;
+                
+                CREATE UNIQUE INDEX IF NOT EXISTS users_user_id_unique ON users (user_id);
+            """)
+        logging.info("✅ Успешное подключение к БД и проверка индексов!")
     except Exception as e:
         logging.error(f"❌ Ошибка подключения: {e}")
 
@@ -66,14 +72,28 @@ async def get_user(user_id: int):
 async def save_user_role(user_id: int, username: str, role_id: int):
     async with db_pool.acquire() as conn:
         user = await get_user(user_id)
+        
         if user is None:
+            # Новый юзер — первый выбор роли (0 смен потрачено)
             await conn.execute(
-                "INSERT INTO users (user_id, username, role_id, role_changes, credits, xp) VALUES ($1, $2, $3, 0, 100, 0)",
+                """
+                INSERT INTO users (user_id, username, role_id, role_changes, credits, xp) 
+                VALUES ($1, $2, $3, 0, 100, 0)
+                ON CONFLICT (user_id) DO UPDATE 
+                SET role_id = EXCLUDED.role_id, username = EXCLUDED.username
+                """,
                 user_id, username, role_id
             )
-        else:
+        elif user['role_id'] is None:
+            # Юзер уже был в базе (например, через daily), но без роли — первый выбор
             await conn.execute(
-                "UPDATE users SET role_id = $1, role_changes = role_changes + 1, username = $2 WHERE user_id = $3",
+                "UPDATE users SET role_id = $1, username = $2 WHERE user_id = $3",
+                role_id, username, user_id
+            )
+        else:
+            # Смена существующей роли на новую (+1 к счетчику смен)
+            await conn.execute(
+                "UPDATE users SET role_id = $1, role_changes = COALESCE(role_changes, 0) + 1, username = $2 WHERE user_id = $3",
                 role_id, username, user_id
             )
 
@@ -92,7 +112,7 @@ async def get_roles_keyboard(current_user_id: int):
         builder.button(text=btn_text, callback_data=f"role_{role['id']}")
     builder.adjust(1)
     return builder.as_markup()
-
+print("=== СТАРТ БОТА ===", flush=True)
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard(message.from_user.id)
@@ -106,16 +126,20 @@ async def cmd_profile(message: types.Message):
     user_data = await get_user(message.from_user.id)
     if user_data:
         role_str = user_data['role_name'] if user_data['role_name'] else "Без роли"
-        credits_val = user_data['credits'] or 100
-        xp_val = user_data['xp'] or 0
+        credits_val = user_data['credits'] if user_data['credits'] is not None else 100
+        xp_val = user_data['xp'] if user_data['xp'] is not None else 0
+        
+        changes_used = user_data['role_changes'] or 0
+        left_changes = max(0, 1 - changes_used)
+        
         status = (
             f"🎭 Персонаж: {role_str}\n"
-            f"💳 Кредиты: {credits_val} 💰\n"
+            f"💳 Бабосики: {credits_val} 💰\n"
             f"⭐️ Опыт: {xp_val} XP\n"
-            f"🔄 Смен роли: {1 - user_data['role_changes']}/1"
+            f"🔄 Смен роли осталось: {left_changes}/1"
         )
     else:
-        status = "🎭 Персонаж: Не выбран"
+        status = "🎭 Персонаж: Не выбран (выбери через /role)"
     await message.answer(f"👤 Профиль {message.from_user.first_name}\n\n{status}", parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("role_"))
@@ -126,25 +150,41 @@ async def callbacks_num(callback: types.CallbackQuery):
     is_admin = username.lower() in [adm.lower() for adm in ADMIN_USERNAMES]
 
     user_data = await get_user(user_id)
-    if user_data and user_data['role_changes'] >= 1 and not is_admin:
-        await callback.answer("❌ Выбор уже сделан!", show_alert=True)
+
+    # 1. Проверка: клик по своему же персонажу
+    if user_data and user_data['role_id'] == role_id:
+        await callback.answer("Ты уже играешь за этого персонажа! 😎", show_alert=True)
         return
 
+    # 2. Проверка: лимит смены роли (если роль уже есть и это именно СМЕНА)
+    if user_data and user_data['role_id'] is not None:
+        changes_used = user_data['role_changes'] or 0
+        if changes_used >= 1 and not is_admin:
+            await callback.answer(
+                "❌ Лимит смен исчерпан (максимум 1 смена)! Пиши админу @sialens_xd",
+                show_alert=True
+            )
+            return
+
+    # 3. Проверка: занят ли персонаж другим пользователем
     async with db_pool.acquire() as conn:
         occupied_by = await conn.fetchval(
             "SELECT user_id FROM users WHERE role_id = $1 AND user_id != $2",
             role_id, user_id
         )
         if occupied_by:
-            await callback.answer("🔒 Персонаж уже занят!", show_alert=True)
+            await callback.answer("🔒 Увы! Этого персонажа уже забрали!", show_alert=True)
             kb = await get_roles_keyboard(user_id)
             await callback.message.edit_reply_markup(reply_markup=kb)
             return
 
+    # Сохраняем роль
     await save_user_role(user_id, username, role_id)
     updated_user = await get_user(user_id)
-    await callback.message.edit_text(f"Ты забронировал персонажа: {updated_user['role_name']}", parse_mode="Markdown")
-    await callback.answer("Персонаж за тобой!")
+    
+    admin_note = " 🛡 *(Админка)*" if is_admin and user_data and (user_data['role_changes'] or 0) >= 1 else ""
+    await callback.message.edit_text(f"Ты забронировал персонажа: {updated_user['role_name']}{admin_note}", parse_mode="Markdown")
+    await callback.answer("Персонаж успешно забронирован!")
 
 # --- СЕРВЕР ---
 async def health_check(request):
