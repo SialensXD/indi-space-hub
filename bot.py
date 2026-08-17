@@ -29,20 +29,14 @@ import random
 active_duels = {}
 duel_invites = {}
 
-# БАЗОВЫЕ СТАТЫ ПЕРСОНАЖЕЙ (защита от разных языков)
+# БАЗОВЫЕ СТАТЫ ПЕРСОНАЖЕЙ (привязаны к role_id из БД)
 CHARACTERS = {
-    "v1": {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"},
-    "в1": {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, # кириллица
-    "v2": {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},
-    "в2": {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"}, # кириллица
-    "санс": {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},
-    "sans": {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},
-    "нико": {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},
-    "niko": {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},
-    "минос прайм": {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
-    "minos prime": {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
-    "полый рыцарь": {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},
-    "hollow knight": {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"}
+    1: {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},   # Knight (Vessel)
+    2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},     # Niko
+    3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      # Sans
+    4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, # V1 Supreme Machine
+    5: {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},  # V2 Peacetime Machine
+    6: {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"}  # Minos Prime
 }
 
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
@@ -375,13 +369,14 @@ async def cb_duel_accept(callback: types.CallbackQuery):
             await callback.message.edit_text("❌ Ошибка: кто-то из игроков пропал из бд.")
             return
             
-        p1_role = p1_data['role_name'].lower().strip() if p1_data['role_name'] else ""
-        p2_role = p2_data['role_name'].lower().strip() if p2_data['role_name'] else ""
+# Берем ID роли (числа от 1 до 6)
+        p1_role_id = p1_data['role_id']
+        p2_role_id = p2_data['role_id']
         
         def_stats = {"hp": 100, "max_hp": 100, "atk": 15, "type": "basic"}
-        c1 = CHARACTERS.get(p1_role, def_stats).copy()
-        c2 = CHARACTERS.get(p2_role, def_stats).copy()
-        
+        c1 = CHARACTERS.get(p1_role_id, def_stats).copy()
+        c2 = CHARACTERS.get(p2_role_id, def_stats).copy()
+
         duel_id = str(random.randint(10000, 99999))
         turn_id = random.choice([p1_id, p2_id])
         
