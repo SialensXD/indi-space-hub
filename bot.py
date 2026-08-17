@@ -381,13 +381,13 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         turn_id = random.choice([p1_id, p2_id])
         
         active_duels[duel_id] = {
-            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False},
-            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False},
+            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False},
+            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False},
             "turn": turn_id,
-            "turn_count": 0,  
+            "turn_count": 0,
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
         }
-        
+
         kb = get_duel_keyboard(duel_id)
         text = render_duel_text(duel_id)
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -398,108 +398,160 @@ async def cb_duel_accept(callback: types.CallbackQuery):
 async def cb_fight(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     parts = callback.data.split("_")
-    action = parts[1] # atk, def, skill, item
+    action = parts[1]
     duel_id = parts[2]
     
-    # 1. Проверки на дурака
     if duel_id not in active_duels:
-        await callback.answer("Этот бой уже завершен или не существует.", show_alert=True)
+        await callback.answer("Этот бой уже завершен!", show_alert=True)
         return
         
     duel = active_duels[duel_id]
-    
     is_p1 = (user_id == duel['p1']['id'])
     is_p2 = (user_id == duel['p2']['id'])
     
     if not (is_p1 or is_p2):
-        await callback.answer("Ты не участвуешь в этом бою, осел.", show_alert=True)
+        await callback.answer("Ты не участвуешь в этом бою! 🍿", show_alert=True)
         return
         
     if duel['turn'] != user_id:
-        await callback.answer("⏳ Сейчас не твой ход, ишак!", show_alert=True)
+        await callback.answer("⏳ Сейчас не твой ход!", show_alert=True)
         return
         
-    # 2. Определяем, кто бьет, а кто получает
     attacker = duel['p1'] if is_p1 else duel['p2']
     defender = duel['p2'] if is_p1 else duel['p1']
     
     log_msg = ""
-    
-    # Сбрасываем блок атакующего (если он ставил его в свой прошлый ход)
     attacker['block'] = False 
     
-    # 3. Обработка действий
-    if action == "atk":
-        # Базовый урон + легкий рандом (-2..+3 урона) для живости
-        dmg = attacker['atk'] + random.randint(-2, 3)
-        
-        dmg = max(0, attacker['atk'] + random.randint(-2, 3))
-        
-        # Пассивка Санса: 45% шанс увернуться
-        if defender['type'] == 'karma' and random.random() < 0.45:
-            dmg = 0
-            log_msg = f"💨 {defender['name']} увернулся от атаки!"
-        else:
-            # Проверка блока (снижает урон на 40%)
-            if defender['block']:
-                dmg = int(dmg * 0.6)
-                log_msg = f"🛡 {defender['name']} заблокировал часть урона!\n"
+    # 1. ПРОВЕРКА НА ОГЛУШЕНИЕ (Кнаклбластер V2)
+    if attacker['stun']:
+        attacker['stun'] = False
+        log_msg = f"💫 {attacker['name']} оглушен и пропускает этот ход!"
+    else:
+        # 2. ОБРАБОТКА ДЕЙСТВИЙ
+        if action == "atk":
+            dmg = max(0, attacker['atk'] + random.randint(-2, 3))
             
-            defender['hp'] -= dmg
-            log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
+            # Проверка на промах Миноса (15%) или ослепление от Санса (25%)
+            miss_chance = 0.15 if attacker['type'] == 'berserk' else 0.0
+            if attacker['blind']: miss_chance += 0.25
             
-            # Пассивка V1: Вампиризм (хил 20% от урона)
-            if attacker['type'] == 'vampire' and dmg > 0:
-                heal = int(dmg * 0.2)
-                if heal < 1: heal = 1 # Минимум 1 хп хила
+            if random.random() < miss_chance:
+                log_msg = f"💨 {attacker['name']} промахивается по противнику!"
+            # Пассивка Санса (45%) или активка Нико (60%)
+            elif (defender['type'] == 'karma' and random.random() < 0.45) or (defender['niko_dodge'] and random.random() < 0.60):
+                defender['niko_dodge'] = False # Сбрасываем бафф Нико
+                log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
+            # Активка V1 (Парирование 50%)
+            elif defender['parry']:
+                defender['parry'] = False # Срабатывает только на 1 удар
+                if random.random() < 0.5:
+                    dmg = 0
+                    log_msg = f"БАМ! {defender['name']} ПАРИРУЕТ атаку, избегая полностью урона!"
+            
+            if dmg > 0:
+                if defender['block']:
+                    dmg = int(dmg * 0.6)
+                    log_msg = f"🛡 {defender['name']} блокирует часть урона!\n"
+                
+                defender['hp'] -= dmg
+                log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
+                
+                # Карма Санса (1-5% урона поверх)
+                if attacker['type'] == 'karma':
+                    karma_dmg = max(1, int(defender['max_hp'] * random.uniform(0.01, 0.05)))
+                    defender['hp'] -= karma_dmg
+                    log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
+                
+                # Вампиризм V1
+                if attacker['type'] == 'vampire':
+                    heal = max(1, int(dmg * 0.2))
+                    attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
+                    log_msg += f" 🩸 Вампиризм: +{heal} HP!"
+                
+        elif action == "def":
+            attacker['block'] = True
+            log_msg = f"🛡 {attacker['name']} уходит в железный блок."
+            
+        elif action == "skill":
+            if attacker['cd'] > 0:
+                await callback.answer(f"⏳ Навык перезаряжается! Осталось ходов: {attacker['cd']}", show_alert=True)
+                return
+            
+            r_type = attacker['type']
+            if r_type == "berserk": # Минос
+                attacker['cd'] = 3
+                if random.random() < 0.5:
+                    log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
+                else:
+                    defender['hp'] -= 50
+                    log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 50 урона!"
+            elif r_type == "enrage": # V2
+                attacker['cd'] = 3
+                defender['stun'] = True
+                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером! {defender['name']} оглушен на следующем ход!"
+            elif r_type == "vampire": # V1
+                attacker['cd'] = 3
+                attacker['parry'] = True
+                log_msg = f"🪙 {attacker['name']} готовится парировать следующую атаку!"
+            elif r_type == "karma": # Санс
+                attacker['cd'] = 3
+                defender['blind'] = True
+                log_msg = f"🦴 {attacker['name']} высрал несмешной каламбур. Точность {defender['name']} снижена!"
+            elif r_type == "light": # Нико
+                attacker['cd'] = 1
+                attacker['niko_dodge'] = True
+                log_msg = f"💡 {attacker['name']} кричит «Я не кот!» и готовится увернуться."
+            elif r_type == "souls": # Рыцарь (Временно Хил)
+                attacker['cd'] = 2
+                heal = int(attacker['max_hp'] * 0.25)
                 attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
-                log_msg += f" 🩸 Восстановил {heal} HP!"
+                log_msg = f"🌀 {attacker['name']} использует «Фокус» и восстанавливает {heal} HP!"
+            else:
+                log_msg = f"У {attacker['name']} нет особых навыков."
             
-    elif action == "def":
-        attacker['block'] = True
-        log_msg = f"🛡 {attacker['name']} уходит в глухую оборону."
-        
-    elif action == "skill":
-        log_msg = f"✨ {attacker['name']} пытается что-то сделать, но забывает, что он - ослоеб!"
-        
-    elif action == "item":
-        log_msg = f"🎒 {attacker['name']} лезет в рюкзак... а там пусто!"
+        elif action == "item":
+            log_msg = f"🎒 {attacker['name']} лезет в рюкзак... а там пусто!"
 
-    # 4. Обновляем лог боя
+    # 3. Снижаем кулдаун атакующего (если он есть)
+    if attacker['cd'] > 0 and action != "skill":
+        attacker['cd'] -= 1
+
     duel['log'] = log_msg
     
-    # 5. Проверка на СМЕРТЬ (конец боя)
+    # 4. Проверка на СМЕРТЬ
     if defender['hp'] <= 0:
         defender['hp'] = 0
         text = render_duel_text(duel_id)
-        text += f"\n\n🏆 ПОБЕДИТЕЛЬ: {attacker['name']}!\n💀 Бой окончен."
+        text += f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {attacker['name']}!\n💀 Бой окончен."
         
-        # Награда победителю (начислим в базу)
         async with db_pool.acquire() as conn:
             await conn.execute(
                 "UPDATE users SET credits = credits + 100, xp = xp + 50 WHERE user_id = $1",
                 attacker['id']
             )
             
-        del active_duels[duel_id] # Удаляем бой из памяти
-        await callback.message.edit_text(text, parse_mode="HTML")
+        del active_duels[duel_id]
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        await callback.message.answer(text, parse_mode="HTML")
         await callback.answer("Победа!")
         return
         
-    # 6. Передача хода
+    # 5. Передача хода
     duel['turn'] = defender['id']
-    duel['turn_count'] += 1 # Увеличиваем счетчик ходов
+    duel['turn_count'] += 1
     
     text = render_duel_text(duel_id)
     kb = get_duel_keyboard(duel_id)
     
-    # Если ход нечетный (например, 1, 3, 5) — значит сходил только первый игрок. Просто редактируем.
     if duel['turn_count'] % 2 != 0:
         try:
             await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         except:
             pass
-    # Если ход четный (2, 4, 6) — значит походили оба (раунд окончен). Пересоздаем внизу.
     else:
         try:
             await callback.message.delete()
@@ -508,6 +560,7 @@ async def cb_fight(callback: types.CallbackQuery):
         await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
         
     await callback.answer()
+    
 
 # --- СЕРВЕР ---
 async def health_check(request):
