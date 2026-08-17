@@ -153,4 +153,7 @@ def main():
     web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "main":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"=== ОШИБКА ПРИ ЗАПУСКЕ ===\n{e}", flush=True)
