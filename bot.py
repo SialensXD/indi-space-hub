@@ -79,7 +79,7 @@ async def get_user(user_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow(
             """
-            SELECT u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, r.name as role_name 
+            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, r.name as role_name 
             FROM users u 
             LEFT JOIN roles r ON u.role_id = r.id 
             WHERE u.user_id = $1
@@ -478,7 +478,7 @@ async def cb_fight(callback: types.CallbackQuery):
             )
             
         del active_duels[duel_id] # Удаляем бой из памяти
-        await callback.message.edit_text(text, parse_mode="Markdown")
+        await callback.message.edit_text(text, parse_mode="HTML")
         await callback.answer("Победа!")
         return
         
@@ -489,7 +489,7 @@ async def cb_fight(callback: types.CallbackQuery):
     text = render_duel_text(duel_id)
     kb = get_duel_keyboard(duel_id)
     
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 # --- СЕРВЕР ---
