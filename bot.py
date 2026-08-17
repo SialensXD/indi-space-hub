@@ -132,23 +132,22 @@ def render_duel_text(duel_id: str):
     duel = active_duels[duel_id]
     p1, p2 = duel['p1'], duel['p2']
     
-    # Генератор HP бара (10 квадратиков)
     def make_hp_bar(hp, max_hp):
         percent = max(0, hp / max_hp)
         filled = int(percent * 10)
         return "🟩" * filled + "⬜️" * (10 - filled)
         
-    text = f"⚔️ СМЕРТЕЛЬНАЯ БИТВА ⚔️\n\n"
-    text += f"🎮 {p1['name']} [{p1['role']}]\n"
+    text = f"⚔️ <b>СМЕРТЕЛЬНАЯ БИТВА, ЫЫЫ</b> ⚔️\n\n"
+    text += f"🎮 <b>{p1['name']}</b> [{p1['role']}]\n"
     text += f"HP: {p1['hp']}/{p1['max_hp']} {make_hp_bar(p1['hp'], p1['max_hp'])}\n\n"
     
-    text += f"🎮 {p2['name']} [{p2['role']}]\n"
+    text += f"🎮 <b>{p2['name']}</b> [{p2['role']}]\n"
     text += f"HP: {p2['hp']}/{p2['max_hp']} {make_hp_bar(p2['hp'], p2['max_hp'])}\n\n"
     
-    text += f"📜 Лог: {duel['log']}\n\n"
+    text += f"📜 <b>Лог:</b> {duel['log']}\n\n"
     
     turn_name = p1['name'] if duel['turn'] == p1['id'] else p2['name']
-    text += f"👉 Ход: {turn_name}"
+    text += f"👉 <b>Ход:</b> {turn_name}"
     return text
 
 def get_duel_keyboard(duel_id: str):
@@ -355,43 +354,43 @@ async def cb_duel_cancel(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("duel_accept_"))
 async def cb_duel_accept(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    p1_id, p2_id = int(parts[2]), int(parts[3])
-    
-    if callback.from_user.id != p2_id:
-        await callback.answer("Это вызывают не тебя!", show_alert=True)
-        return
-    
-    # Грузим статы из базы
-    p1_data = await get_user(p1_id)
-    p2_data = await get_user(p2_id)
-    
-    if not p1_data or not p2_data:
-        await callback.message.edit_text("❌ Ошибка: кто-то из игроков пропал из базы.")
-        return
+    try:
+        parts = callback.data.split("_")
+        p1_id, p2_id = int(parts[2]), int(parts[3])
         
-    p1_role = p1_data['role_name'].lower() if p1_data['role_name'] else ""
-    p2_role = p2_data['role_name'].lower() if p2_data['role_name'] else ""
-    
-    # Дефолтные статы, если имя роли не совпало со словарем CHARACTERS
-    def_stats = {"hp": 100, "max_hp": 100, "atk": 15, "type": "basic"}
-    c1 = CHARACTERS.get(p1_role, def_stats).copy()
-    c2 = CHARACTERS.get(p2_role, def_stats).copy()
-    
-    duel_id = str(random.randint(10000, 99999))
-    turn_id = random.choice([p1_id, p2_id]) # Жеребьевка хода
-    
-    active_duels[duel_id] = {
-        "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False},
-        "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False},
-        "turn": turn_id,
-        "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
-    }
-    
-    # Рисуем поле боя
-    kb = get_duel_keyboard(duel_id)
-    text = render_duel_text(duel_id)
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        if callback.from_user.id != p2_id:
+            await callback.answer("Это вызывают не тебя!", show_alert=True)
+            return
+        
+        p1_data = await get_user(p1_id)
+        p2_data = await get_user(p2_id)
+        
+        if not p1_data or not p2_data:
+            await callback.message.edit_text("❌ Ошибка: кто-то из игроков пропал из бд.")
+            return
+            
+        p1_role = p1_data['role_name'].lower() if p1_data['role_name'] else ""
+        p2_role = p2_data['role_name'].lower() if p2_data['role_name'] else ""
+        
+        def_stats = {"hp": 100, "max_hp": 100, "atk": 15, "type": "basic"}
+        c1 = CHARACTERS.get(p1_role, def_stats).copy()
+        c2 = CHARACTERS.get(p2_role, def_stats).copy()
+        
+        duel_id = str(random.randint(10000, 99999))
+        turn_id = random.choice([p1_id, p2_id])
+        
+        active_duels[duel_id] = {
+            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False},
+            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False},
+            "turn": turn_id,
+            "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
+        }
+        
+        kb = get_duel_keyboard(duel_id)
+        text = render_duel_text(duel_id)
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка старта боя: {e}", show_alert=True)
 
 @dp.callback_query(F.data.startswith("fight_"))
 async def cb_fight(callback: types.CallbackQuery):
