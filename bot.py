@@ -432,6 +432,12 @@ async def cb_fight(callback: types.CallbackQuery):
         if action == "atk":
             dmg = max(0, attacker['atk'] + random.randint(-2, 3))
             
+            # --- ПАССИВНАЯ ЯРОСТЬ V2 ---
+            if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 2):
+                dmg += 10 # Плюс 10 к урону с каждой тычки!
+                log_msg = f"💢 V2 В ЯРОСТИ! "
+            # ---------------------------
+            
             # Проверка на промах Миноса (20%) или ослепление от Санса (25%)
             miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
             if attacker['blind']: miss_chance += 0.25
@@ -485,7 +491,7 @@ async def cb_fight(callback: types.CallbackQuery):
             r_type = attacker['type']
             if r_type == "berserk": # Минос
                 attacker['cd'] = 3
-                if random.random() < 0.5:
+                if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
                 else:
                     defender['hp'] -= 50
@@ -493,7 +499,8 @@ async def cb_fight(callback: types.CallbackQuery):
             elif r_type == "enrage": # V2
                 attacker['cd'] = 3
                 defender['stun'] = True
-                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером! {defender['name']} оглушен на следующем ход!"
+                defender['hp'] -= 15 # Кнаклбластер теперь наносит 15 гарантированного урона!
+                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 15 урона! {defender['name']} оглушен на следующий ход!"
             elif r_type == "vampire": # V1
                 attacker['cd'] = 3
                 attacker['parry'] = True
