@@ -32,7 +32,11 @@ async def init_db():
     
     dsn = DATABASE_URL.replace("postgres://", "postgresql://")
     try:
-        db_pool = await asyncpg.create_pool(dsn=dsn)
+        # Добавили statement_cache_size=0 для работы с PgBouncer на Render
+        db_pool = await asyncpg.create_pool(
+            dsn=dsn,
+            statement_cache_size=0
+        )
         async with db_pool.acquire() as conn:
             await conn.execute("""
                 DELETE FROM users a USING users b 
