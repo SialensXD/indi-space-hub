@@ -152,8 +152,5 @@ def main():
     logging.info(f"🚀 Запуск сервера на порту {port}...")
     web.run_app(app, host="0.0.0.0", port=port)
 
-if __name__ == "main":
-    try:
-        main()
-    except Exception as e:
-        print(f"=== ОШИБКА ПРИ ЗАПУСКЕ ===\n{e}", flush=True)
+print("--- ЗАПУСК MAIN ---", flush=True)
+main()
