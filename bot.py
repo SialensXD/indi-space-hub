@@ -102,6 +102,7 @@ async def callbacks_num(callback: types.CallbackQuery):
 
     user_data = await get_user(user_id)
 
+    # Проверяем лимиты только если юзер уже есть
     if user_data is not None:
         if user_data['role_changes'] >= 1 and not is_admin:
             await callback.answer(
@@ -109,13 +110,15 @@ async def callbacks_num(callback: types.CallbackQuery):
                 show_alert=True
             )
             return
-        await save_user_role(user_id, username, role_id)
+            
+    # Сохраняем роль для ВСЕХ (и новых, и старых юзеров)
+    await save_user_role(user_id, username, role_id)
     
-    # Получаем название выбранной роли
+    # Получаем название выбранной роли из базы
     updated_user = await get_user(user_id)
     role_name = updated_user['role_name'] if updated_user else "Выбрана"
     
-    admin_note = " 🛡️ *(Админ-доступ)*" if is_admin and user_data and user_data['role_changes'] >= 1 else ""
+    admin_note = " 🛡 *(Админ-доступ)*" if is_admin and user_data and user_data['role_changes'] >= 1 else ""
     await callback.message.edit_text(f"Успешно! Твоя роль: {role_name}{admin_note}", parse_mode="Markdown")
     await callback.answer("Роль сохранена!")
 
