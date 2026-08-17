@@ -1,3 +1,4 @@
+print("=== СТАРТ БОТА ===", flush=True)
 import os
 import sys
 import logging
