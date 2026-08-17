@@ -122,7 +122,7 @@ async def cmd_profile(message: types.Message):
         
         status = (
             f"🎭 Персонаж: {role_str}\n"
-            f"💳 Бабосики: {credits_val} 💰\n"
+            f"💳 Кредиты: {credits_val} 💰\n"
             f"⭐️ Опыт: {xp_val} XP\n"
             f"🔄 Смен роли осталось: {left_changes}/1"
         )
@@ -209,7 +209,7 @@ async def callbacks_num(callback: types.CallbackQuery):
     user_data = await get_user(user_id)
 
     if user_data and user_data['role_id'] == role_id:
-        await callback.answer("Ты уже играешь за этого персонажа! 😎", show_alert=True)
+        await callback.answer("Ты уже выбрал этого персонажа! 👺", show_alert=True)
         return
 
     if user_data and user_data['role_id'] is not None:
