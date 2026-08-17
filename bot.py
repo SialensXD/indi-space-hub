@@ -79,7 +79,7 @@ async def get_roles_keyboard():
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard()
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Выбери свою роль во вселенной Indie Space:",
+        f"Привет, {message.from_user.first_name}! Выбери свою роль во флуде Indie Space:",
         reply_markup=kb
     )
 
@@ -119,6 +119,49 @@ async def cmd_reset(message: types.Message):
         await message.answer(f"✅ Лимит для @{target_username} сброшен! Он может снова выбрать роль.")
     else:
         await message.answer(f"❌ Пользователь @{target_username} не найден в базе. (Он должен хоть раз нажать кнопку роли).")
+
+@dp.message(Command("send"))
+async def cmd_broadcast(message: types.Message):
+    # 1. Проверяем, админ ли пишет
+    username = message.from_user.username or ""
+    if username.lower() not in [adm.lower() for adm in ADMIN_USERNAMES]:
+        return
+
+    # 2. Вытаскиваем текст сообщения
+    text_to_send = message.text.replace("/send", "").strip()
+    
+    if not text_to_send:
+        await message.answer("⚠️ Использование: /send Твой текст для рассылки", parse_mode="Markdown")
+        return
+
+    # 3. Идем в базу за списком всех юзеров
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM users")
+    
+    if not users:
+        await message.answer("В базе пока нет пользователей.")
+        return
+
+    await message.answer(f"🚀 Начинаю рассылку для {len(users)} пользователей...")
+    
+    success_count = 0
+    fail_count = 0
+    
+    # 4. Рассылаем с защитой от блокировки
+    for user in users:
+        try:
+            await bot.send_message(user['user_id'], text_to_send)
+            success_count += 1
+            await asyncio.sleep(0.05) # Предохранитель от анти-спам системы Телеграма
+        except Exception as e:
+            logging.error(f"Не удалось отправить {user['user_id']}: {e}")
+            fail_count += 1 # Юзер заблокировал бота или удалил аккаунт
+            
+    await message.answer(
+        f"✅ Рассылка завершена!\n"
+        f"Успешно доставлено: {success_count}\n"
+        f"Ошибок (заблокировали бота): {fail_count}"
+    )
 
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
