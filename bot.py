@@ -4,6 +4,7 @@ import sys
 import logging
 import asyncio
 import asyncpg
+from datetime import datetime, timezone, timedelta
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -28,7 +29,6 @@ async def init_db():
         logging.error("❌ DATABASE_URL не найден в переменных окружения!")
         return
     
-    # Корректируем формат DSN при необходимости
     dsn = DATABASE_URL.replace("postgres://", "postgresql://")
     try:
         db_pool = await asyncpg.create_pool(dsn=dsn)
@@ -44,7 +44,7 @@ async def get_user(user_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow(
             """
-            SELECT u.role_id, u.role_changes, r.name as role_name 
+            SELECT u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, r.name as role_name 
             FROM users u 
             LEFT JOIN roles r ON u.role_id = r.id 
             WHERE u.user_id = $1
@@ -57,7 +57,7 @@ async def save_user_role(user_id: int, username: str, role_id: int):
         user = await get_user(user_id)
         if user is None:
             await conn.execute(
-                "INSERT INTO users (user_id, username, role_id, role_changes) VALUES ($1, $2, $3, 0)",
+                "INSERT INTO users (user_id, username, role_id, role_changes, credits, xp) VALUES ($1, $2, $3, 0, 100, 0)",
                 user_id, username, role_id
             )
         else:
@@ -79,28 +79,71 @@ async def get_roles_keyboard():
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard()
     await message.answer(
-        f"Привет, {message.from_user.first_name}! Выбери свою роль во флуде Indie Space:",
+        f"Привет, {message.from_user.first_name}! Выбери свою роль во вселенной Indie Space:",
         reply_markup=kb
     )
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
     user_data = await get_user(message.from_user.id)
-    if user_data and user_data['role_name']:
-        status = f"🎭 Роль: {user_data['role_name']}\n🔄 Изменений роли: {user_data['role_changes']}/1"
+    if user_data:
+        role_str = user_data['role_name'] if user_data['role_name'] else "Без роли (выбери через /role)"
+        credits_val = user_data['credits'] if user_data['credits'] is not None else 100
+        xp_val = user_data['xp'] if user_data['xp'] is not None else 0
+        status = (
+            f"🎭 Роль: {role_str}\n"
+            f"💳 Кредиты: {credits_val} 💰\n"
+            f"⭐ Опыт: {xp_val} XP\n"
+            f"🔄 Изменений роли: {user_data['role_changes']}/1"
+        )
     else:
         status = "🎭 Роль: Без роли (выбери через /role)"
         
-    await message.answer(f"👤 Профиль {message.from_user.first_name}\n{status}", parse_mode="Markdown")
+    await message.answer(f"👤 Профиль {message.from_user.first_name}\n\n{status}", parse_mode="Markdown")
+
+@dp.message(Command("daily"))
+async def cmd_daily(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+    user_data = await get_user(user_id)
+    if not user_data:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO users (user_id, username, credits, xp, role_changes) VALUES ($1, $2, 100, 0, 0)",
+                user_id, username
+            )
+        user_data = await get_user(user_id)
+
+    now = datetime.now(timezone.utc)
+    last_daily = user_data['last_daily']
+
+    if last_daily and (now - last_daily) < timedelta(hours=24):
+        remaining = timedelta(hours=24) - (now - last_daily)
+        hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+        minutes, _ = divmod(remainder, 60)
+        await message.answer(f"⏳ Ты уже забирал награду! Приходи через {hours} ч. {minutes} мин.")
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users 
+            SET credits = COALESCE(credits, 0) + 250, 
+                xp = COALESCE(xp, 0) + 50, 
+                last_daily = $1 
+            WHERE user_id = $2
+            """,
+            now, user_id
+        )
+
+    await message.answer("🎁 Ежедневная награда получена!\n\n+250 Кредитов 💰\n+50 XP ⭐", parse_mode="Markdown")
 
 @dp.message(Command("reset"))
 async def cmd_reset(message: types.Message):
-    # Проверяем, админ ли пишет
     username = message.from_user.username or ""
     if username.lower() not in [adm.lower() for adm in ADMIN_USERNAMES]:
         return
 
-    # Разделяем текст сообщения, ожидаем формат: /reset @username
     args = message.text.split()
     if len(args) != 2:
         await message.answer("⚠️ Использование: /reset @username", parse_mode="Markdown")
@@ -108,7 +151,6 @@ async def cmd_reset(message: types.Message):
         
     target_username = args[1].replace("@", "")
     
-    # Идем в базу и сбрасываем лимит этому юзеру
     async with db_pool.acquire() as conn:
         result = await conn.execute(
             "UPDATE users SET role_changes = 0 WHERE username = $1", 
@@ -116,25 +158,21 @@ async def cmd_reset(message: types.Message):
         )
         
     if result == "UPDATE 1":
-        await message.answer(f"✅ Лимит для @{target_username} сброшен! Он может снова выбрать роль.")
+        await message.answer(f"✅ Лимит для @{target_username} сброшен!")
     else:
-        await message.answer(f"❌ Пользователь @{target_username} не найден в базе. (Он должен хоть раз нажать кнопку роли).")
+        await message.answer(f"❌ Пользователь @{target_username} не найден в базе.")
 
 @dp.message(Command("send"))
 async def cmd_broadcast(message: types.Message):
-    # 1. Проверяем, админ ли пишет
     username = message.from_user.username or ""
     if username.lower() not in [adm.lower() for adm in ADMIN_USERNAMES]:
         return
 
-    # 2. Вытаскиваем текст сообщения
     text_to_send = message.text.replace("/send", "").strip()
-    
     if not text_to_send:
-        await message.answer("⚠️ Использование: /send Твой текст для рассылки", parse_mode="Markdown")
+        await message.answer("⚠️ Использование: /send Твой текст", parse_mode="Markdown")
         return
 
-    # 3. Идем в базу за списком всех юзеров
     async with db_pool.acquire() as conn:
         users = await conn.fetch("SELECT user_id FROM users")
     
@@ -147,20 +185,17 @@ async def cmd_broadcast(message: types.Message):
     success_count = 0
     fail_count = 0
     
-    # 4. Рассылаем с защитой от блокировки
     for user in users:
         try:
             await bot.send_message(user['user_id'], text_to_send)
             success_count += 1
-            await asyncio.sleep(0.05) # Предохранитель от анти-спам системы Телеграма
+            await asyncio.sleep(0.05)
         except Exception as e:
-            logging.error(f"Не удалось отправить {user['user_id']}: {e}")
-            fail_count += 1 # Юзер заблокировал бота или удалил аккаунт
+            logging.error(f"Ошибка отправки {user['user_id']}: {e}")
+            fail_count += 1
             
     await message.answer(
-        f"✅ Рассылка завершена!\n"
-        f"Успешно доставлено: {success_count}\n"
-        f"Ошибок (заблокировали бота): {fail_count}"
+        f"✅ Рассылка завершена!\nУспешно: {success_count}\nОшибок: {fail_count}"
     )
 
 @dp.callback_query(F.data.startswith("role_"))
@@ -172,7 +207,6 @@ async def callbacks_num(callback: types.CallbackQuery):
 
     user_data = await get_user(user_id)
 
-    # Проверяем лимиты только если юзер уже есть
     if user_data is not None:
         if user_data['role_changes'] >= 1 and not is_admin:
             await callback.answer(
@@ -180,11 +214,8 @@ async def callbacks_num(callback: types.CallbackQuery):
                 show_alert=True
             )
             return
-            
-    # Сохраняем роль для ВСЕХ (и новых, и старых юзеров)
-    await save_user_role(user_id, username, role_id)
+        await save_user_role(user_id, username, role_id)
     
-    # Получаем название выбранной роли из базы
     updated_user = await get_user(user_id)
     role_name = updated_user['role_name'] if updated_user else "Выбрана"
     
