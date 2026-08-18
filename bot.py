@@ -961,6 +961,13 @@ async def cb_use_item(callback: types.CallbackQuery):
         
     await callback.answer("Предмет использован!")
 
+@dp.message(F.animation)
+async def catch_gif_id(message: types.Message):
+    # Работает только для тебя (id из твоего админ-блока)
+    if message.from_user.id == 7857165309: 
+        file_id = message.animation.file_id
+        await message.answer(f"Твой file_id:\n<code>{file_id}</code>", parse_mode="HTML")
+
 # --- СЕРВЕР ---
 async def health_check(request):
     return web.Response(text="Bot is alive!", status=200)
