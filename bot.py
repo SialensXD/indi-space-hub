@@ -99,11 +99,11 @@ async def init_db():
 
 async def refresh_shop_if_needed():
     global shop_data
-    # Обновляем, если прошло больше 4 часов или если магазин пуст
     if not shop_data['items'] or (datetime.now(timezone.utc) - shop_data['last_update']) >= timedelta(hours=4):
         async with db_pool.acquire() as conn:
-            shop_data['items'] = await conn.fetch("SELECT * FROM items ORDER BY RANDOM() LIMIT 3")
-            shop_data['titles'] = await conn.fetch("SELECT * FROM titles WHERE is_admin_only = FALSE ORDER BY RANDOM() LIMIT 2")
+            # Ставим LIMIT 4 для предметов и титулов
+            shop_data['items'] = await conn.fetch("SELECT * FROM items ORDER BY RANDOM() LIMIT 4")
+            shop_data['titles'] = await conn.fetch("SELECT * FROM titles WHERE is_admin_only = FALSE ORDER BY RANDOM() LIMIT 4")
         shop_data['last_update'] = datetime.now(timezone.utc)
         logging.info("🏪 Ассортимент магазина обновлен!")
 
@@ -203,27 +203,50 @@ def get_duel_keyboard(duel_id: str):
     return builder.as_markup()
 
 
+# --- ГЕНЕРАТОР ВКЛАДОК МАГАЗИНА ---
+def get_shop_keyboard(category="items"):
+    builder = InlineKeyboardBuilder()
+    
+    if category == "items":
+        # Кнопки для предметов
+        for i in shop_data['items']:
+            price = i.get('price', 50)
+            builder.button(text=f"📦 {i['name']} ({price} 💰)", callback_data=f"buy_item_{i['id']}_{price}")
+        # Кнопка переключения вкладки
+        builder.button(text="➡️ Смотреть Титулы", callback_data="shop_tab_titles")
+    else:
+        # Кнопки для титулов
+        for t in shop_data['titles']:
+            builder.button(text=f"🏷 {t['name']} ({t['price']} 💰)", callback_data=f"buy_title_{t['id']}_{t['price']}")
+        # Кнопка переключения вкладки
+        builder.button(text="⬅️ Смотреть Предметы", callback_data="shop_tab_items")
+        
+    builder.adjust(1) # Все кнопки друг под другом
+    return builder.as_markup()
+
+# --- ВХОД В МАГАЗИН ---
 @dp.message(Command("shop"))
 async def cmd_shop(message: types.Message):
     await refresh_shop_if_needed()
     
-    items = shop_data['items']
-    titles = shop_data['titles']
+    text = "🏪<b>Магазин (обновка каждые 4ч):</b>\n\n<i>Раздел: 🎒 Предметы</i>"
+    # При первом входе всегда открываем предметы
+    await message.answer(text, reply_markup=get_shop_keyboard("items"), parse_mode="HTML")
+
+# --- ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК ---
+@dp.callback_query(F.data.startswith("shop_tab_"))
+async def cb_shop_tab(callback: types.CallbackQuery):
+    tab = callback.data.split("_")[2] # 'items' или 'titles'
     
-    text = "🏪 <b> Магазин (завоз каждые 4ч):</b>\n\nВыбирай с умом!\n"
-    builder = InlineKeyboardBuilder()
+    # Заодно проверяем, не истекли ли 4 часа, пока игрок листал вкладки
+    await refresh_shop_if_needed() 
     
-    # Кнопки для предметов
-    for i in items:
-        price = i.get('price', 50)
-        builder.button(text=f"📦 {i['name']} ({price} 💰)", callback_data=f"buy_item_{i['id']}_{price}")
-        
-    # Кнопки для титулов
-    for t in titles:
-        builder.button(text=f"🏷 {t['name']} ({t['price']} 💰)", callback_data=f"buy_title_{t['id']}_{t['price']}")
-        
-    builder.adjust(1) # Кнопки идут в столбик
-    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    section_name = "🎒 Предметы" if tab == "items" else "🏷 Титулы"
+    text = f"🏪 <b>Магазин (обновка каждые 4ч):</b>\n\n<i>Раздел: {section_name}</i>"
+    
+    # Меняем текст и подменяем кнопки (без отправки нового сообщения)
+    await callback.message.edit_text(text, reply_markup=get_shop_keyboard(tab), parse_mode="HTML")
+    await callback.answer() # Убираем "часики" загрузки на кнопке
 @dp.callback_query(F.data.startswith("buy_"))
 async def cb_buy(callback: types.CallbackQuery):
     parts = callback.data.split("_")
