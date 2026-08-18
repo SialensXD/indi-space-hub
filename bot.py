@@ -292,11 +292,10 @@ async def cmd_profile(message: types.Message):
                     
             # Шаг 3: Проверяем инвентарь
             inv_items = await conn.fetch("""
-                SELECT i.name, SUM(inv.count) as total_count 
+                SELECT i.name, inv."count" as total_count 
                 FROM inventory inv 
                 JOIN items i ON inv.item_id = i.id 
-                WHERE inv.user_id = $1 
-                GROUP BY i.name
+                WHERE inv.user_id = $1 AND inv."count" > 0
             """, user_id)
         
         inv_text = "\n".join([f"🎒 {item['name']}: {item['total_count']} шт." for item in inv_items]) or "🎒 Пусто"
