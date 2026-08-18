@@ -25,6 +25,27 @@ db_pool = None
 
 import random
 
+RANK_TITLES = {
+    0: "Новичок",
+    5: "Прошедший Вьетнам",
+    10: "SSSУПЕР ХОРОШ",
+    25: "Отказавшийся от личной жизни",
+    50: "Оптимус Прайм",
+    75: "ПОТУЖНЫЙ",
+    100: "Зачем @ Прайм сделал все это?",
+    125: "сигма-скибиди228",
+    150: "I REGRET NOTHING",
+    200: "DEMIGOD"
+}
+
+def get_rank_title(xp):
+    # Берем самый высокий подходящий титул
+    current_rank = "Новичок"
+    for threshold in sorted(RANK_TITLES.keys()):
+        if xp >= threshold:
+            current_rank = RANK_TITLES[threshold]
+    return current_rank
+
 # СЛОВАРИ ДЛЯ БОЕВКИ
 active_duels = {}
 duel_invites = {}
@@ -40,6 +61,9 @@ CHARACTERS = {
     # МОЯ АДМИНСКАЯ РОЛЬ
     999: {"hp": 9999, "max_hp": 9999, "atk": 9999, "type": "god"} 
 }
+
+# --- МАГАЗИН ---
+shop_data = {"items": [], "titles": [], "last_update": datetime.now(timezone.utc)}
 
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
 async def init_db():
@@ -65,6 +89,16 @@ async def init_db():
         logging.info("✅ Подключение к БД успешно!")
     except Exception as e:
         logging.error(f"❌ Ошибка БД: {e}")
+
+async def refresh_shop_if_needed():
+    global shop_data
+    # Обновляем, если прошло больше 4 часов или если магазин пуст
+    if not shop_data['items'] or (datetime.now(timezone.utc) - shop_data['last_update']) >= timedelta(hours=4):
+        async with db_pool.acquire() as conn:
+            shop_data['items'] = await conn.fetch("SELECT * FROM items ORDER BY RANDOM() LIMIT 3")
+            shop_data['titles'] = await conn.fetch("SELECT * FROM titles WHERE is_admin_only = FALSE ORDER BY RANDOM() LIMIT 2")
+        shop_data['last_update'] = datetime.now(timezone.utc)
+        logging.info("🏪 Ассортимент магазина обновлен!")
 
 async def get_roles():
     async with db_pool.acquire() as conn:
@@ -161,6 +195,24 @@ def get_duel_keyboard(duel_id: str):
     builder.adjust(2, 2)
     return builder.as_markup()
 
+
+@dp.message(Command("shop"))
+async def cmd_shop(message: types.Message):
+    await refresh_shop_if_needed() # Проверяем, не пора ли обновить
+    
+    items = shop_data['items']
+    titles = shop_data['titles']
+    
+    text = "🏪 <b>Магазин (обновление каждые 4ч):</b>\n\n"
+    text += "📦 <b>Предметы:</b>\n"
+    for i in items:
+        text += f"• {i['name']} — {i['effect_value']} кр.\n"
+        
+    text += "\n🏷 <b>Титулы:</b>\n"
+    for t in titles:
+        text += f"• {t['name']} — {t['price']} кр.\n"
+        
+    await message.answer(text, parse_mode="HTML")
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard(message.from_user.id)
@@ -623,6 +675,7 @@ async def health_check(request):
 
 async def on_startup(bot: Bot):
     await init_db()
+    await refresh_shop_if_needed() # <--- ДОБАВЬ ЭТО
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
     if base_url:
         await bot.set_webhook(f"{base_url}{WEBHOOK_PATH}", drop_pending_updates=True)
