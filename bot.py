@@ -447,56 +447,61 @@ async def cb_fight(callback: types.CallbackQuery):
         attacker['stun'] = False
         log_msg = f"💫 {attacker['name']} оглушен и пропускает этот ход!"
     else:
-        # 2. ОБРАБОТКА ДЕЙСТВИЙ
+    # 2. ОБРАБОТКА ДЕЙСТВИЙ
         if action == "atk":
-            dmg = max(0, attacker['atk'] + random.randint(-2, 3))
-            
-            # --- ПАССИВНАЯ ЯРОСТЬ V2 ---
-            if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 2):
-                dmg += 10 # Плюс 10 к урону с каждой тычки!
-                log_msg = f"💢 V2 В ЯРОСТИ! "
-            # ---------------------------
-            
-            # Проверка на промах Миноса (20%) или ослепление от Санса (25%)
-            miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
-            if attacker['blind']: miss_chance += 0.25
-            
-            if random.random() < miss_chance:
-                dmg = 0
-                log_msg = f"💨 {attacker['name']} промахивается по противнику!"
-            # Пассивка Санса (45%) или активка Нико (60%)
-            elif (defender['type'] == 'karma' and random.random() < 0.45) or (defender['niko_dodge'] and random.random() < 0.60):
-                defender['niko_dodge'] = False # Сбрасываем бафф Нико
-                dmg = 0
-                log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
+            # --- 🛡 БОЖЕСТВЕННАЯ ЗАЩИТА (АДМИН) ---
+            if defender['type'] == 'god':
+                attacker['hp'] -= 9999
+                log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> мгновенно расщеплен на атомы (-9999 HP)."
+            else:
+                # --- ОБЫЧНАЯ АТАКА (для простых смертных) ---
+                dmg = max(0, attacker['atk'] + random.randint(-2, 3))
+                
+                # Пассивная ярость V2
+                if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 2):
+                    dmg += 10
+                    log_msg = f"💢 V2 В ЯРОСТИ! "
+                
+                # Проверка на промах Миноса (20%) или ослепление от Санса (25%)
+                miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
+                if attacker['blind']: miss_chance += 0.25
+                
+                if random.random() < miss_chance:
+                    dmg = 0
+                    log_msg = f"💨 {attacker['name']} промахивается по противнику!"
+                # Пассивка Санса (45%) или активка Нико (60%)
+                elif (defender['type'] == 'karma' and random.random() < 0.45) or (defender['niko_dodge'] and random.random() < 0.60):
+                    defender['niko_dodge'] = False # Сбрасываем бафф Нико
+                    dmg = 0
+                    log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
                 # Активка V1 (Парирование 50%)
-            elif defender['parry']:
-                defender['parry'] = False # Срабатывает только на 1 удар
-                if random.random() < 0.5:
-                    reflected_dmg = dmg # Запоминаем летящий урон
-                    attacker['hp'] -= reflected_dmg # Возвращаем его атакующему
-                    dmg = 0 # V1 урон не получает
-                    log_msg = f"🪙 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно в {attacker['name']}!"
-            
-            if dmg > 0:
-                if defender['block']:
-                    dmg = int(dmg * 0.6)
-                    log_msg = f"🛡 {defender['name']} блокирует часть урона!\n"
+                elif defender['parry']:
+                    defender['parry'] = False # Срабатывает только на 1 удар
+                    if random.random() < 0.5:
+                        reflected_dmg = dmg # Запоминаем летящий урон
+                        attacker['hp'] -= reflected_dmg # Возвращаем его атакующему
+                        dmg = 0 # V1 урон не получает
+                        log_msg = f"🪙 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно в {attacker['name']}!"
                 
-                defender['hp'] -= dmg
-                log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
-                
-                # Карма Санса (1-5% урона поверх)
-                if attacker['type'] == 'karma':
-                    karma_dmg = max(1, int(defender['max_hp'] * random.uniform(0.01, 0.05)))
-                    defender['hp'] -= karma_dmg
-                    log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
-                
-                # Вампиризм V1
-                if attacker['type'] == 'vampire':
-                    heal = max(1, int(dmg * 0.2))
-                    attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
-                    log_msg += f" 🩸 Вампиризм: +{heal} HP!"
+                if dmg > 0:
+                    if defender['block']:
+                        dmg = int(dmg * 0.6)
+                        log_msg = f"🛡 {defender['name']} блокирует часть урона!\n"
+                    
+                    defender['hp'] -= dmg
+                    log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
+                    
+                    # Карма Санса
+                    if attacker['type'] == 'karma':
+                        karma_dmg = max(1, int(defender['max_hp'] * random.uniform(0.01, 0.05)))
+                        defender['hp'] -= karma_dmg
+                        log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
+                    
+                    # Вампиризм V1
+                    if attacker['type'] == 'vampire':
+                        heal = max(1, int(dmg * 0.2))
+                        attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
+                        log_msg += f" 🩸 Вампиризм: +{heal} HP!"
                 
         elif action == "def":
             attacker['block'] = True
