@@ -25,19 +25,6 @@ db_pool = None
 
 import random
 
-RANK_TITLES = {
-    0: "Новичок",
-    5: "Прошедший Вьетнам",
-    10: "SSSУПЕР ХОРОШ",
-    25: "Отказавшийся от личной жизни",
-    50: "Оптимус Прайм",
-    75: "ПОТУЖНЫЙ",
-    100: "Зачем @ Прайм сделал все это?",
-    125: "сигма-скибиди228",
-    150: "I REGRET NOTHING",
-    200: "DEMIGOD"
-}
-
 import math
 
 def get_level(xp):
@@ -896,11 +883,19 @@ async def cb_use_item(callback: types.CallbackQuery):
         defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
         winner = attacker if defender['hp'] <= 0 else defender
         
+        # Настраиваем размер награды
+        win_xp = 50
+        win_credits = 100
+        
         text = render_duel_text(duel_id)
-        text += f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n💀 Бой окончен."
+        text += (
+            f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n"
+            f"🎁 <b>Награда:</b> +{win_xp} XP и +{win_credits} 💰\n"
+            f"💀 Бой окончен."
+        )
         
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET credits = credits + 100, xp = xp + 50 WHERE user_id = $1", winner['id'])
+            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2 WHERE user_id = $3", win_credits, win_xp, winner['id'])
             
         del active_duels[duel_id]
         try:
