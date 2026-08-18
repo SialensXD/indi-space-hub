@@ -38,13 +38,33 @@ RANK_TITLES = {
     200: "DEMIGOD"
 }
 
+import math
+
+def get_level(xp):
+    """Высчитывает текущий уровень по квадратичной формуле"""
+    if xp < 5:
+        return 0
+    return int(math.sqrt(xp / 5))
+
+def get_next_level_xp(level):
+    return 5 * ((level + 1) ** 2)
+
 def get_rank_title(xp):
-    # Берем самый высокий подходящий титул
-    current_rank = "Новичок"
-    for threshold in sorted(RANK_TITLES.keys()):
-        if xp >= threshold:
-            current_rank = RANK_TITLES[threshold]
-    return current_rank
+    lvl = get_level(xp)
+    if lvl < 5:
+        return f"Новичок"
+    elif lvl < 15:
+        return f"Пережил Вьетнам"
+    elif lvl < 30:
+        return f"Без личной жизни"
+    elif lvl < 50:
+        return f"Оптимус Прайм"
+    elif lvl < 100:
+        return f"ПОТУЖНЫЙ"
+    elif lvl < 200:
+        return f"сигма-скибиди228"
+    else:
+        return f"I REGRET NOTHING"
 
 # СЛОВАРИ ДЛЯ БОЕВКИ
 active_duels = {}
@@ -279,13 +299,18 @@ async def cmd_profile(message: types.Message):
     xp_val = user_data['xp'] or 0
     left_changes = max(0, 1 - (user_data['role_changes'] or 0))
     
-    current_title = f"[{get_rank_title(xp_val)}]" 
+# Высчитываем прогресс уровня
+    lvl = get_level(xp_val)
+    next_xp = get_next_level_xp(lvl)
+    left_xp = next_xp - xp_val
+    
+    current_title = f"[{get_rank_title(xp_val)} | Lvl {lvl}]" 
     
     async with db_pool.acquire() as conn:
         if user_data.get('title_id'):
             title_row = await conn.fetchrow("SELECT name FROM titles WHERE id = $1", user_data['title_id'])
             if title_row:
-                current_title = f"[{title_row['name']}] 👑"
+                current_title = f"[{title_row['name']}] 👑 [Lvl {lvl}]"
                 
         inv_items = await conn.fetch("""
             SELECT items.name, count as total_count 
@@ -300,7 +325,7 @@ async def cmd_profile(message: types.Message):
         f"🏆 Титул: <b>{current_title}</b>\n"
         f"🎭 Персонаж: {role_str}\n"
         f"💳 Кредиты: {credits_val} 💰\n"
-        f"⭐️ Опыт: {xp_val} XP\n"
+        f"⭐️ Опыт: {xp_val} XP <i>(до {lvl+1} ур: {left_xp} XP)</i>\n"
         f"🔄 Смен роли: {left_changes}/1\n\n"
         f"<b>Твой рюкзак:</b>\n{inv_text}"
     )
