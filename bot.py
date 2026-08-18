@@ -735,7 +735,31 @@ async def cb_fight(callback: types.CallbackQuery):
                 log_msg = f"У {attacker['name']} нет особых навыков."
             
         elif action == "item":
-            log_msg = f"🎒 {attacker['name']} лезет в рюкзак... а там пусто!"
+            # Ищем предметы в БД
+            async with db_pool.acquire() as conn:
+                inv = await conn.fetch("""
+                    SELECT i.id, i.name, inv.count 
+                    FROM inventory inv 
+                    JOIN items i ON inv.item_id = i.id 
+                    WHERE inv.user_id = $1 AND inv.count > 0
+                """, attacker['id'])
+            
+            if not inv:
+                await callback.answer("🎒 Твой рюкзак абсолютно пуст!", show_alert=True)
+                return
+            
+            # Строим клавиатуру с инвентарем (вместо кнопок боя)
+            builder = InlineKeyboardBuilder()
+            for item in inv:
+                builder.button(
+                    text=f"🧪 {item['name']} ({item['count']} шт)", 
+                    callback_data=f"useitem_{duel_id}_{item['id']}"
+                )
+            builder.button(text="🔙 Отмена", callback_data=f"fight_back_{duel_id}")
+            builder.adjust(1)
+            
+            await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+            return # Прерываем cb_fight, ждем пока игрок выберет предмет
 
     # 3. Снижаем кулдаун атакующего (если он есть)
     if attacker['cd'] > 0 and action != "skill":
@@ -791,6 +815,95 @@ async def cb_fight(callback: types.CallbackQuery):
         
     await callback.answer()
     
+@dp.callback_query(F.data.startswith("fight_back_"))
+async def cb_fight_back(callback: types.CallbackQuery):
+    duel_id = callback.data.split("_")[2]
+    if duel_id not in active_duels:
+        return
+    kb = get_duel_keyboard(duel_id)
+    await callback.message.edit_reply_markup(reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("useitem_"))
+async def cb_use_item(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    duel_id, item_id = parts[1], int(parts[2])
+    user_id = callback.from_user.id
+    
+    if duel_id not in active_duels:
+        await callback.answer("Бой уже окончен!", show_alert=True)
+        return
+        
+    duel = active_duels[duel_id]
+    if duel['turn'] != user_id:
+        await callback.answer("⏳ Не твой ход!", show_alert=True)
+        return
+        
+    is_p1 = (user_id == duel['p1']['id'])
+    attacker = duel['p1'] if is_p1 else duel['p2']
+    defender = duel['p2'] if is_p1 else duel['p1']
+    
+    async with db_pool.acquire() as conn:
+        has_item = await conn.fetchrow("SELECT count FROM inventory WHERE user_id = $1 AND item_id = $2", user_id, item_id)
+        if not has_item or has_item['count'] <= 0:
+            await callback.answer("Этот предмет закончился!", show_alert=True)
+            return
+        
+        # Достаем статы предмета и списываем его
+        item = await conn.fetchrow("SELECT name, effect_type, effect_value FROM items WHERE id = $1", item_id)
+        await conn.execute("UPDATE inventory SET count = count - 1 WHERE user_id = $1 AND item_id = $2", user_id, item_id)
+        await conn.execute("DELETE FROM inventory WHERE count <= 0") # Убираем мусор
+        
+    # --- 1. ПРИМЕНЯЕМ ЭФФЕКТ ---
+    e_type, e_val = item['effect_type'], item['effect_value']
+    
+    if e_type == 'heal':
+        attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + e_val)
+        duel['log'] = f"🧪 {attacker['name']} выпивает {item['name']}! Восстановлено {e_val} HP."
+    elif e_type == 'dmg':
+        defender['hp'] -= e_val
+        duel['log'] = f"💣 {attacker['name']} швыряет {item['name']} в лицо противнику на {e_val} урона!"
+    elif e_type == 'buff':
+        attacker['atk'] += e_val
+        duel['log'] = f"💉 {attacker['name']} вкалывает {item['name']}. Атака повышена на {e_val}!"
+        
+    if attacker['cd'] > 0:
+        attacker['cd'] -= 1
+
+    # --- 2. ПРОВЕРКА НА СМЕРТЬ (КОПИЯ ИЗ cb_fight) ---
+    if defender['hp'] <= 0 or attacker['hp'] <= 0:
+        defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
+        winner = attacker if defender['hp'] <= 0 else defender
+        
+        text = render_duel_text(duel_id)
+        text += f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n💀 Бой окончен."
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET credits = credits + 100, xp = xp + 50 WHERE user_id = $1", winner['id'])
+            
+        del active_duels[duel_id]
+        try:
+            await callback.message.delete()
+        except: pass
+        await callback.message.answer(text, parse_mode="HTML")
+        await callback.answer("Победа!")
+        return
+
+    # --- 3. ПЕРЕДАЧА ХОДА ---
+    duel['turn'] = defender['id']
+    duel['turn_count'] += 1
+    
+    text = render_duel_text(duel_id)
+    kb = get_duel_keyboard(duel_id)
+    
+    if duel['turn_count'] % 2 != 0:
+        try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except: pass
+    else:
+        try: await callback.message.delete()
+        except: pass
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        
+    await callback.answer("Предмет использован!")
 
 # --- СЕРВЕР ---
 async def health_check(request):
