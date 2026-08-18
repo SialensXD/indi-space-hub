@@ -69,6 +69,17 @@ CHARACTERS = {
     999: {"hp": 9999, "max_hp": 9999, "atk": 9999, "type": "god"} 
 }
 
+# Гифки для спец-атак
+SKILL_GIFS = {
+    "god": "CgACAgIAAyEFAATuFYO6AAIBFGqDDUvNeyrykVmC0FV6nUlidfHbAALSpgACh5HoS43Z8PpZnYurPQQ",
+    "berserk": "CgACAgIAAxkBAAOBaoTqBA5NC1-tj3E4kfpmln15A28AAgmqAAKU3yFI3isVHX0Wp6g9BA",
+    "enrage": "CgACAgIAAxkBAAOGaoTqtU_-i746Ps8je2RcBBQ4VlQAAgyqAAKU3yFIC7s2LleYvjM9BA",
+    "vampire": "CgACAgIAAxkBAAOIaoTq1KHEeqRI6UISOtOq-8QJWFIAAg2qAAKU3yFInZVWVcf-7Jo9BA",
+    "karma": "CgACAgIAAxkBAAOKaoTrno_MtK1bhhlRDzzAqadPMcUAAg6qAAKU3yFIeGnOjHQrPe09BA",
+    "light": "CgACAgIAAxkBAAONaoTr07Wre4FlnhDNQTqAxiGeHCUAAg-qAAKU3yFIq1sILGVxN1k9BA",
+    "souls": "CgACAgIAAxkBAAOEaoTqcQ6ZdM6aAAEcAWN07ZQFOy6jAAILqgAClN8hSEhkcIg6sjqEPQQ"
+}
+
 # --- МАГАЗИН ---
 shop_data = {"items": [], "titles": [], "last_update": datetime.now(timezone.utc)}
 
@@ -779,6 +790,16 @@ async def cb_fight(callback: types.CallbackQuery):
                 log_msg = f"🌀 {attacker['name']} использует «Фокус» и восстанавливает {heal} HP!"
             else:
                 log_msg = f"У {attacker['name']} нет особых навыков."
+        
+            # --- НОВЫЙ БЛОК: ОТПРАВКА ГИФКИ ---
+            gif_id = SKILL_GIFS.get(r_type)
+            # Проверяем, что ID задан и не является заглушкой
+            if gif_id and not gif_id.startswith("тут_"):
+                try:
+                    # Кидаем гифку отдельным сообщением прямо перед обновлением интерфейса
+                    await callback.message.answer_animation(animation=gif_id)
+                except Exception:
+                    pass 
             
         elif action == "item":
             # Ищем предметы в БД
