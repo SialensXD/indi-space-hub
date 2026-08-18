@@ -267,54 +267,45 @@ async def cmd_role(message: types.Message):
     await message.answer("Выбирай себе персонажа:", reply_markup=kb)
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
-    try:
-        user_id = message.from_user.id
+    user_id = message.from_user.id
+    user_data = await get_user(user_id)
+    
+    if not user_data:
+        await message.answer("🎭 Персонаж: Не выбран (выбери через /role)")
+        return
         
-        # Шаг 1: Проверяем юзера
-        user_data = await get_user(user_id)
-        if not user_data:
-            await message.answer("🎭 Персонаж: Не выбран (выбери через /role)")
-            return
-            
-        role_str = user_data['role_name'] or "Без роли"
-        credits_val = user_data['credits'] or 0
-        xp_val = user_data['xp'] or 0
-        left_changes = max(0, 1 - (user_data['role_changes'] or 0))
-        
-        current_title = f"[{get_rank_title(xp_val)}]" 
-        
-        async with db_pool.acquire() as conn:
-            # Шаг 2: Проверяем титул
-            if user_data.get('title_id'):
-                title_row = await conn.fetchrow("SELECT name FROM titles WHERE id = $1", user_data['title_id'])
-                if title_row:
-                    current_title = f"[{title_row['name']}] 👑"
-                    
-            # Шаг 3: Проверяем инвентарь
-            inv_items = await conn.fetch("""
-                SELECT items.name, count as total_count 
-                FROM inventory 
-                JOIN items ON inventory.item_id = items.id 
-                WHERE user_id = $1 AND count > 0
-            """, user_id)
-        
-        inv_text = "\n".join([f"🎒 {item['name']}: {item['total_count']} шт." for item in inv_items]) or "🎒 Пусто"
-        
-        status = (
-            f"🏆 Титул: <b>{current_title}</b>\n"
-            f"🎭 Персонаж: {role_str}\n"
-            f"💳 Кредиты: {credits_val} 💰\n"
-            f"⭐️ Опыт: {xp_val} XP\n"
-            f"🔄 Смен роли: {left_changes}/1\n\n"
-            f"<b>Твой рюкзак:</b>\n{inv_text}"
-        )
-        
-        await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", parse_mode="HTML")
-
-    except Exception as e:
-        import traceback
-        err_trace = traceback.format_exc()
-        await message.answer(f"❌ ОШИБКА В ПРОФИЛЕ:\n<code>{err_trace[-1000:]}</code>", parse_mode="HTML")
+    role_str = user_data['role_name'] or "Без роли"
+    credits_val = user_data['credits'] or 0
+    xp_val = user_data['xp'] or 0
+    left_changes = max(0, 1 - (user_data['role_changes'] or 0))
+    
+    current_title = f"[{get_rank_title(xp_val)}]" 
+    
+    async with db_pool.acquire() as conn:
+        if user_data.get('title_id'):
+            title_row = await conn.fetchrow("SELECT name FROM titles WHERE id = $1", user_data['title_id'])
+            if title_row:
+                current_title = f"[{title_row['name']}] 👑"
+                
+        inv_items = await conn.fetch("""
+            SELECT items.name, count as total_count 
+            FROM inventory 
+            JOIN items ON inventory.item_id = items.id 
+            WHERE user_id = $1 AND count > 0
+        """, user_id)
+    
+    inv_text = "\n".join([f"🎒 {item['name']}: {item['total_count']} шт." for item in inv_items]) or "🎒 Пусто"
+    
+    status = (
+        f"🏆 Титул: <b>{current_title}</b>\n"
+        f"🎭 Персонаж: {role_str}\n"
+        f"💳 Кредиты: {credits_val} 💰\n"
+        f"⭐️ Опыт: {xp_val} XP\n"
+        f"🔄 Смен роли: {left_changes}/1\n\n"
+        f"<b>Твой рюкзак:</b>\n{inv_text}"
+    )
+    
+    await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", parse_mode="HTML")
 @dp.message(Command("daily"))
 async def cmd_daily(message: types.Message):
     user_id = message.from_user.id
