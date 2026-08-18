@@ -778,20 +778,22 @@ async def cb_fight(callback: types.CallbackQuery):
     
 # 4. Проверка на СМЕРТЬ (умер либо защитник, либо атакующий от отдачи)
     if defender['hp'] <= 0 or attacker['hp'] <= 0:
-        defender['hp'] = max(0, defender['hp'])
-        attacker['hp'] = max(0, attacker['hp'])
-        
-        # Определяем, кто выжил
+        defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
         winner = attacker if defender['hp'] <= 0 else defender
         
+        # Настраиваем размер награды
+        win_xp = 50
+        win_credits = 25
+        
         text = render_duel_text(duel_id)
-        text += f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n💀 Бой окончен."
+        text += (
+            f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n"
+            f"🎁 <b>Награда:</b> +{win_xp} XP и +{win_credits} 💰\n"
+            f"💀 Бой окончен."
+        )
         
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE users SET credits = credits + 100, xp = xp + 50 WHERE user_id = $1",
-                winner['id']
-            )
+            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2 WHERE user_id = $3", win_credits, win_xp, winner['id'])
             
         del active_duels[duel_id]
         
@@ -885,7 +887,7 @@ async def cb_use_item(callback: types.CallbackQuery):
         
         # Настраиваем размер награды
         win_xp = 50
-        win_credits = 100
+        win_credits = 25
         
         text = render_duel_text(duel_id)
         text += (
