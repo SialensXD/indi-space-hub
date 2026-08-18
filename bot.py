@@ -210,7 +210,7 @@ async def cmd_shop(message: types.Message):
     items = shop_data['items']
     titles = shop_data['titles']
     
-    text = "🏪 <b>Теневой Магазин (завоз каждые 4ч):</b>\n\nВыбирай с умом!\n"
+    text = "🏪 <b> Магазин (завоз каждые 4ч):</b>\n\nВыбирай с умом!\n"
     builder = InlineKeyboardBuilder()
     
     # Кнопки для предметов
@@ -488,6 +488,20 @@ async def cmd_clear_db(message: types.Message):
     async with db_pool.acquire() as conn:
         await conn.execute("TRUNCATE TABLE users;")
     await message.answer("🧹 База пользователей очищена!")
+@dp.message(Command("reroll"))
+async def cmd_reroll_shop(message: types.Message):
+    # Защита: работает только для админов
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]:
+        return
+        
+    global shop_data
+    # Откидываем время последнего обновления в самый минимум
+    shop_data['last_update'] = datetime.min.replace(tzinfo=timezone.utc)
+    
+    # Вызываем обычную функцию обновления (она увидит, что время вышло, и сменит товар)
+    await refresh_shop_if_needed()
+    
+    await message.answer("🔄 Витрина Магазина принудительно обновлена! (Админ абьюз).")
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
     user_id = callback.from_user.id
