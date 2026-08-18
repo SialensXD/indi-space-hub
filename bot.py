@@ -115,14 +115,14 @@ async def get_user(user_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow(
             """
-            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, r.name as role_name 
+            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, u.title_id, r.name as role_name 
             FROM users u 
             LEFT JOIN roles r ON u.role_id = r.id 
             WHERE u.user_id = $1
             """,
             user_id
         )
-
+        
 async def save_user_role(user_id: int, username: str, role_id: int):
     async with db_pool.acquire() as conn:
         user = await get_user(user_id)
@@ -267,22 +267,48 @@ async def cmd_role(message: types.Message):
     await message.answer("Выбирай себе персонажа:", reply_markup=kb)
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
-    user_data = await get_user(message.from_user.id)
-    if user_data:
-        role_str = user_data['role_name'] or "Без роли"
-        credits_val = user_data['credits'] if user_data['credits'] is not None else 100
-        xp_val = user_data['xp'] if user_data['xp'] is not None else 0
-        left_changes = max(0, 1 - (user_data['role_changes'] or 0))
+    user_id = message.from_user.id
+    user_data = await get_user(user_id)
+    
+    if not user_data:
+        await message.answer("🎭 Персонаж: Не выбран (выбери через /role)")
+        return
         
-        status = (
-            f"🎭 Персонаж: {role_str}\n"
-            f"💳 Кредиты: {credits_val} 💰\n"
-            f"⭐️ Опыт: {xp_val} XP\n"
-            f"🔄 Смен роли осталось: {left_changes}/1"
-        )
-    else:
-        status = "🎭 Персонаж: Не выбран (выбери через /role)"
-    await message.answer(f"👤 Профиль {message.from_user.first_name}\n\n{status}", parse_mode="Markdown")
+    role_str = user_data['role_name'] or "Без роли"
+    credits_val = user_data['credits'] or 0
+    xp_val = user_data['xp'] or 0
+    left_changes = max(0, 1 - (user_data['role_changes'] or 0))
+    
+    # --- ОПРЕДЕЛЯЕМ ТИТУЛ ---
+    current_title = f"[{get_rank_title(xp_val)}]" # По умолчанию даем за уровни
+    
+    async with db_pool.acquire() as conn:
+        if user_data['title_id']:
+            # Если есть купленный титул, достаем его имя
+            title_row = await conn.fetchrow("SELECT name FROM titles WHERE id = $1", user_data['title_id'])
+            if title_row:
+                current_title = f"[{title_row['name']}] 👑"
+                
+        # --- СОБИРАЕМ ИНВЕНТАРЬ ---
+        inv_items = await conn.fetch("""
+            SELECT i.name, inv.count 
+            FROM inventory inv 
+            JOIN items i ON inv.item_id = i.id 
+            WHERE inv.user_id = $1
+        """, user_id)
+    
+    inv_text = "\n".join([f"🎒 {item['name']}: {item['count']} шт." for item in inv_items]) or "🎒 Пусто"
+    
+    status = (
+        f"🏆 Титул: <b>{current_title}</b>\n"
+        f"🎭 Персонаж: {role_str}\n"
+        f"💳 Кредиты: {credits_val} 💰\n"
+        f"⭐️ Опыт: {xp_val} XP\n"
+        f"🔄 Смен роли: {left_changes}/1\n\n"
+        f"<b>Твой рюкзак:</b>\n{inv_text}"
+    )
+    
+    await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", parse_mode="HTML")
 @dp.message(Command("daily"))
 async def cmd_daily(message: types.Message):
     user_id = message.from_user.id
@@ -361,6 +387,55 @@ async def cmd_duel(message: types.Message):
     except Exception as e:
         # Если код снова упадет, бот не промолчит, а выведет причину краша прямо в чат
         await message.answer(f"🔧 Ого, тута системная ошибка: {e}, зовите Сиаленса!")
+
+@dp.message(Command("title"))
+async def cmd_title(message: types.Message):
+    user_id = message.from_user.id
+    
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT xp, title_id FROM users WHERE user_id = $1", user_id)
+        if not user:
+            return
+        
+        # Достаем все титулы, которые купил игрок
+        bought_titles = await conn.fetch("""
+            SELECT t.id, t.name 
+            FROM user_titles ut 
+            JOIN titles t ON ut.title_id = t.id 
+            WHERE ut.user_id = $1
+        """, user_id)
+        
+    xp = user['xp'] or 0
+    builder = InlineKeyboardBuilder()
+    
+    # 1. Кнопка сброса на обычный ранговый титул (бесплатный)
+    current_rank = get_rank_title(xp)
+    builder.button(text=f"🔰 Вернуть ранговый: [{current_rank}]", callback_data="equip_title_0")
+    
+    # 2. Кнопки с купленными титулами
+    for t in bought_titles:
+        mark = "✅ " if user['title_id'] == t['id'] else "👑 "
+        builder.button(text=f"{mark}{t['name']}", callback_data=f"equip_title_{t['id']}")
+        
+    builder.adjust(1)
+    await message.answer("<b>Выбери титул, который хочешь носить:</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+# Хендлер переодевания титула
+@dp.callback_query(F.data.startswith("equip_title_"))
+async def cb_equip_title(callback: types.CallbackQuery):
+    title_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    async with db_pool.acquire() as conn:
+        if title_id == 0:
+            await conn.execute("UPDATE users SET title_id = NULL WHERE user_id = $1", user_id)
+            await callback.answer("🔰 Установлен ранговый титул по умолчанию!", show_alert=True)
+        else:
+            await conn.execute("UPDATE users SET title_id = $1 WHERE user_id = $2", title_id, user_id)
+            await callback.answer("👑 Кастомный титул надет!", show_alert=True)
+            
+    # Удаляем сообщение с кнопками, чтобы не засорять чат
+    await callback.message.delete()
 
 # --- АДМИН КОМАНДЫ ---
 @dp.message(Command("reset"))
