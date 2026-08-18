@@ -198,21 +198,69 @@ def get_duel_keyboard(duel_id: str):
 
 @dp.message(Command("shop"))
 async def cmd_shop(message: types.Message):
-    await refresh_shop_if_needed() # Проверяем, не пора ли обновить
+    await refresh_shop_if_needed()
     
     items = shop_data['items']
     titles = shop_data['titles']
     
-    text = "🏪 <b>Магазин (обновление каждые 4ч):</b>\n\n"
-    text += "📦 <b>Предметы:</b>\n"
+    text = "🏪 <b>Теневой Магазин (завоз каждые 4ч):</b>\n\nВыбирай с умом!\n"
+    builder = InlineKeyboardBuilder()
+    
+    # Кнопки для предметов
     for i in items:
-        text += f"• {i['name']} — {i['effect_value']} кр.\n"
+        price = i.get('price', 50)
+        builder.button(text=f"📦 {i['name']} ({price} 💰)", callback_data=f"buy_item_{i['id']}_{price}")
         
-    text += "\n🏷 <b>Титулы:</b>\n"
+    # Кнопки для титулов
     for t in titles:
-        text += f"• {t['name']} — {t['price']} кр.\n"
+        builder.button(text=f"🏷 {t['name']} ({t['price']} 💰)", callback_data=f"buy_title_{t['id']}_{t['price']}")
         
-    await message.answer(text, parse_mode="HTML")
+    builder.adjust(1) # Кнопки идут в столбик
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+@dp.callback_query(F.data.startswith("buy_"))
+async def cb_buy(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    buy_type = parts[1] # 'item' или 'title'
+    item_id = int(parts[2])
+    price = int(parts[3])
+    user_id = callback.from_user.id
+    
+    async with db_pool.acquire() as conn:
+        # Проверяем баланс
+        user = await conn.fetchrow("SELECT credits FROM users WHERE user_id = $1", user_id)
+        if not user or user['credits'] < price:
+            await callback.answer("❌ Нищеброд! Не хватает кредитов.", show_alert=True)
+            return
+            
+        # Списываем бабки
+        await conn.execute("UPDATE users SET credits = credits - $1 WHERE user_id = $2", price, user_id)
+        
+        if buy_type == "item":
+            # Кидаем в рюкзак (если предмет есть - увеличиваем количество)
+            await conn.execute("""
+                INSERT INTO inventory (user_id, item_id, count) 
+                VALUES ($1, $2, 1) 
+                ON CONFLICT (user_id, item_id) DO UPDATE 
+                SET count = inventory.count + 1
+            """, user_id, item_id)
+            await callback.answer("✅ Предмет куплен и брошен в рюкзак!", show_alert=True)
+            
+        elif buy_type == "title":
+            # Проверяем, не куплен ли он уже
+            exists = await conn.fetchval("SELECT 1 FROM user_titles WHERE user_id = $1 AND title_id = $2", user_id, item_id)
+            if exists:
+                # Если уже есть, возвращаем деньги
+                await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", price, user_id)
+                await callback.answer("⚠️ У тебя уже есть этот титул!", show_alert=True)
+                return
+                
+            # Добавляем в коллекцию и сразу надеваем
+            await conn.execute("INSERT INTO user_titles (user_id, title_id) VALUES ($1, $2)", user_id, item_id)
+            await conn.execute("UPDATE users SET title_id = $1 WHERE user_id = $2", item_id, user_id)
+            await callback.answer("👑 Титул куплен и торжественно надет!", show_alert=True)
+            
+    # Обновляем текст в самом магазине, чтобы игрок видел, что кнопки работают
+    await callback.message.edit_text(callback.message.text + f"\n\n<i>{callback.from_user.first_name} только что что-то купил...</i>", reply_markup=callback.message.reply_markup, parse_mode="HTML")
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard(message.from_user.id)
