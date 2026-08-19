@@ -91,7 +91,7 @@ CHARACTERS = {
     2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},     
     3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      
     4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, 
-    5: {"hp": 125, "max_hp": 130, "atk": 15, "type": "enrage"},  
+    5: {"hp": 125, "max_hp": 125, "atk": 15, "type": "enrage"},  
     6: {"hp": 140, "max_hp": 140, "atk": 19, "type": "berserk"},
     # МОЯ АДМИНСКАЯ РОЛЬ
     999: {"hp": 9999, "max_hp": 9999, "atk": 9999, "type": "god"} 
@@ -1504,7 +1504,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 dmg = max(0, attacker['atk'] + random.randint(-1, 1))
                 
                 if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 3):
-                    dmg += 7
+                    dmg += 12
                     log_msg = f"💢 V2 В ЯРОСТИ! "
                 
                 miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
