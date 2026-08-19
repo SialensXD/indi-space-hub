@@ -63,7 +63,7 @@ CHARACTERS = {
     2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},     
     3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      
     4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, 
-    5: {"hp": 130, "max_hp": 130, "atk": 15, "type": "enrage"},  
+    5: {"hp": 125, "max_hp": 130, "atk": 15, "type": "enrage"},  
     6: {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
     # МОЯ АДМИНСКАЯ РОЛЬ
     999: {"hp": 9999, "max_hp": 9999, "atk": 9999, "type": "god"} 
@@ -689,7 +689,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 dmg = max(0, attacker['atk'] + random.randint(-2, 3))
                 
                 if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 2):
-                    dmg += 10
+                    dmg += 7
                     log_msg = f"💢 V2 В ЯРОСТИ! "
                 
                 miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
@@ -727,7 +727,7 @@ async def cb_fight(callback: types.CallbackQuery):
                         log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
                     
                     if attacker['type'] == 'vampire':
-                        heal = max(1, int(dmg * 0.2))
+                        heal = max(1, int(dmg * 0.4))
                         attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
                         log_msg += f" 🩸 Вампиризм: +{heal} HP!"
                 
@@ -782,16 +782,6 @@ async def cb_fight(callback: types.CallbackQuery):
                 log_msg = f"🌀 {attacker['name']} использует «Фокус» и восстанавливает {heal} HP!"
             else:
                 log_msg = f"У {attacker['name']} нет особых навыков."
-        
-            # --- НОВЫЙ БЛОК: ОТПРАВКА ГИФКИ ---
-            gif_id = SKILL_GIFS.get(r_type)
-            # Проверяем, что ID задан и не является заглушкой
-            if gif_id and not gif_id.startswith("тут_"):
-                try:
-                    # Кидаем гифку отдельным сообщением прямо перед обновлением интерфейса
-                    await callback.message.answer_animation(animation=gif_id)
-                except Exception:
-                    pass 
             
         elif action == "item":
             # Ищем предметы в БД
