@@ -32,6 +32,10 @@ import math
 
 import re
 
+import uuid
+
+active_chests = set() 
+
 # Кэш триггеров в ОЗУ
 TRIGGERS_CACHE = {}
 
@@ -159,12 +163,15 @@ async def init_db():
                 
                 CREATE UNIQUE INDEX IF NOT EXISTS users_user_id_unique ON users (user_id);
 
-                -- Таблица для триггеров автоответа
                 CREATE TABLE IF NOT EXISTS triggers (
                     id SERIAL PRIMARY KEY,
                     phrase TEXT UNIQUE NOT NULL,
                     reply_text TEXT NOT NULL
                 );
+                
+                -- НОВЫЕ ПОЛЯ
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS msg_count INTEGER DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE;
             """)
         logging.info("✅ Подключение к БД успешно!")
     except Exception as e:
@@ -174,9 +181,24 @@ async def refresh_shop_if_needed():
     global shop_data
     if not shop_data['items'] or (datetime.now(timezone.utc) - shop_data['last_update']) >= timedelta(hours=4):
         async with db_pool.acquire() as conn:
-            # Ставим LIMIT 4 для предметов и титулов
             shop_data['items'] = await conn.fetch("SELECT * FROM items ORDER BY RANDOM() LIMIT 4")
             shop_data['titles'] = await conn.fetch("SELECT * FROM titles WHERE is_admin_only = FALSE ORDER BY RANDOM() LIMIT 4")
+            
+            # --- НОВЫЙ БЛОК: РАССЫЛКА ---
+            if shop_data['last_update'] != datetime.min.replace(tzinfo=timezone.utc): # Не спамим при самом первом запуске
+                users_to_notify = await conn.fetch("SELECT user_id FROM users WHERE notifications_enabled = TRUE")
+                for u in users_to_notify:
+                    try:
+                        await bot.send_message(
+                            u['user_id'], 
+                            "🏪 <b>В магазине обновился ассортимент!</b>", 
+                            parse_mode="HTML"
+                        )
+                        await asyncio.sleep(0.05) # Лимиты Telegram
+                    except Exception:
+                        pass # Юзер мог заблокировать бота
+            # -----------------------------
+
         shop_data['last_update'] = datetime.now(timezone.utc)
         logging.info("🏪 Ассортимент магазина обновлен!")
 
@@ -195,7 +217,8 @@ async def get_user(user_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow(
             """
-            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, u.title_id, r.name as role_name 
+            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, u.title_id, 
+                   u.msg_count, u.notifications_enabled, r.name as role_name 
             FROM users u 
             LEFT JOIN roles r ON u.role_id = r.id 
             WHERE u.user_id = $1
@@ -398,6 +421,7 @@ async def cb_buy(callback: types.CallbackQuery):
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard(message.from_user.id)
     await message.answer("Выбирай себе персонажа:", reply_markup=kb)
+
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
     user_id = message.from_user.id
@@ -410,13 +434,13 @@ async def cmd_profile(message: types.Message):
     role_str = user_data['role_name'] or "Без роли"
     credits_val = user_data['credits'] or 0
     xp_val = user_data['xp'] or 0
+    msg_count = user_data['msg_count'] or 0
     left_changes = max(0, 1 - (user_data['role_changes'] or 0))
+    notif_enabled = user_data['notifications_enabled']
     
-# Высчитываем прогресс уровня
     lvl = get_level(xp_val)
     next_xp = get_next_level_xp(lvl)
     left_xp = next_xp - xp_val
-    
     current_title = f"[{get_rank_title(xp_val)} | Lvl {lvl}]" 
     
     async with db_pool.acquire() as conn:
@@ -439,11 +463,33 @@ async def cmd_profile(message: types.Message):
         f"🎭 Персонаж: {role_str}\n"
         f"💳 Кредиты: {credits_val} 💰\n"
         f"⭐️ Опыт: {xp_val} XP <i>(до {lvl+1} ур: {left_xp} XP)</i>\n"
+        f"💬 Сообщений: {msg_count}\n"
         f"🔄 Смен роли: {left_changes}/1\n\n"
         f"<b>Твой рюкзак:</b>\n{inv_text}"
     )
     
-    await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", parse_mode="HTML")
+    # Кнопка для настройки уведомлений
+    builder = InlineKeyboardBuilder()
+    notif_text = "🔕 Выключить ЛС-рассылку" if notif_enabled else "🔔 Включить ЛС-рассылку"
+    builder.button(text=notif_text, callback_data="toggle_notif")
+    
+    await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+# Хендлер для переключения уведомлений
+@dp.callback_query(F.data == "toggle_notif")
+async def cb_toggle_notif(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    async with db_pool.acquire() as conn:
+        current_status = await conn.fetchval("SELECT notifications_enabled FROM users WHERE user_id = $1", user_id)
+        new_status = not current_status
+        await conn.execute("UPDATE users SET notifications_enabled = $1 WHERE user_id = $2", new_status, user_id)
+    
+    status_msg = "включены ✅" if new_status else "выключены ❌"
+    await callback.answer(f"Рассылка об обновлениях магазина {status_msg}!", show_alert=True)
+    
+    # Обновляем профиль чтобы кнопка поменяла название
+    await cmd_profile(callback.message)
+    await callback.message.delete()
     
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -1717,21 +1763,64 @@ async def cb_use_item(callback: types.CallbackQuery):
 async def track_messages(message: types.Message):
     user_id = message.from_user.id
     msg_text = message.text.lower()
+    chat_id = message.chat.id
 
-    # 1. Счечик сообщений для /top
     async with db_pool.acquire() as conn:
         try:
             await conn.execute("UPDATE users SET msg_count = COALESCE(msg_count, 0) + 1 WHERE user_id = $1", user_id)
         except Exception:
             pass
 
-    # 2. Мгновенная проверка триггеров из ОЗУ по отдельным словам
+    # --- СИСТЕМА СУНДУКОВ ---
+    # Сундуки падают только в группах с шансом, например, 3% на каждое сообщение
+    if message.chat.type in ['group', 'supergroup'] and random.random() < 0.03:
+        chest_id = str(uuid.uuid4())[:8]
+        active_chests.add(chest_id)
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🎁 Забрать", callback_data=f"chest_claim_{chest_id}")
+        
+        await message.answer(
+            "🔔 <b>Внезапный дроп!</b>\nКто-то обронил сундук с кредитами. Кто первый нажмет — того и лут!", 
+            reply_markup=builder.as_markup(), 
+            parse_mode="HTML"
+        )
+
+    # Мгновенная проверка триггеров
     for phrase, reply_text in TRIGGERS_CACHE.items():
-        # Регулярка изолирует слово/фразу со всех сторон от букв и цифр
         pattern = rf'(?<!\w){re.escape(phrase)}(?!\w)'
         if re.search(pattern, msg_text):
             await message.reply(reply_text, parse_mode="HTML")
             break
+
+# Хендлер нажатия на сундук
+@dp.callback_query(F.data.startswith("chest_claim_"))
+async def cb_chest_claim(callback: types.CallbackQuery):
+    chest_id = callback.data.split("_")[2]
+    user_id = callback.from_user.id
+    user_name = callback.from_user.first_name
+    
+    if chest_id not in active_chests:
+        await callback.answer("Увы и ах, сундук уже кто-то обчистил или он испарился!", show_alert=True)
+        return
+        
+    # Удаляем сундук, чтобы никто больше не забрал
+    active_chests.remove(chest_id)
+    reward = random.randint(200, 700) # Рандомная награда
+    
+    async with db_pool.acquire() as conn:
+        # Проверяем, есть ли юзер в базе
+        user_exists = await conn.fetchval("SELECT 1 FROM users WHERE user_id = $1", user_id)
+        if not user_exists:
+            await conn.execute("INSERT INTO users (user_id, username, credits, xp, role_changes) VALUES ($1, $2, $3, 0, 0)", user_id, callback.from_user.username or "", reward)
+        else:
+            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", reward, user_id)
+            
+    await callback.message.edit_text(
+        f"🎁 <b>{user_name}</b> оказался самым быстрым и забрал из сундука <b>{reward} 💰</b>!",
+        parse_mode="HTML"
+    )
+    await callback.answer(f"Ты получил {reward} кредитов!")
 
 # --- СЕРВЕР ---
 async def health_check(request):
