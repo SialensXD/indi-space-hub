@@ -89,7 +89,7 @@ duel_invites = {}
 CHARACTERS = {
     1: {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},   
     2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},     
-    3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      
+    3: {"hp": 1, "max_hp": 1, "atk": 0.1, "type": "karma"},      
     4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, 
     5: {"hp": 125, "max_hp": 125, "atk": 15, "type": "enrage"},  
     6: {"hp": 140, "max_hp": 140, "atk": 19, "type": "berserk"},
@@ -1501,7 +1501,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 attacker['hp'] -= 9999
                 log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> расщеплен на атомы (-9999 HP)."
             else:
-                dmg = max(0, attacker['atk'] + random.randint(-1, 1))
+                dmg = max(0, attacker['atk'] + random.randint(0, 0))
                 
                 if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 3):
                     dmg += 12
@@ -1513,7 +1513,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 if random.random() < miss_chance:
                     dmg = 0
                     log_msg = f"💨 {attacker['name']} промахивается по противнику!"
-                elif (defender['type'] == 'karma' and random.random() < 0.45) or (defender['niko_dodge'] and random.random() < 0.60):
+                elif (defender['type'] == 'karma' and random.random() < 0.97) or (defender['niko_dodge'] and random.random() < 0.60):
                     defender['niko_dodge'] = False 
                     dmg = 0
                     log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
@@ -1530,14 +1530,15 @@ async def cb_fight(callback: types.CallbackQuery):
                 
                 if dmg > 0:
                     if defender['block']:
-                        dmg = int(dmg * 0.6)
+                        dmg = int(dmg * 0.5)
                         log_msg = f"🛡 {defender['name']} блокирует часть урона!\n"
                     
                     defender['hp'] -= dmg
                     log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
                     
                     if attacker['type'] == 'karma':
-                        karma_dmg = max(1, int(defender['max_hp'] * random.uniform(0.01, 0.05)))
+                        
+                        karma_dmg = max(1, int(defender['hp'] * 0.1))
                         defender['hp'] -= karma_dmg
                         log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
                     
@@ -1561,35 +1562,54 @@ async def cb_fight(callback: types.CallbackQuery):
             if r_type != "vampire":
                 turn_gif = SKILL_GIFS.get(r_type)
             
+            is_karma_dodge = (defender['type'] == 'karma' and random.random() < 0.97)
+
             if r_type == "god": 
                 attacker['cd'] = 1
-                dmg = int(defender['max_hp'] * 0.99)
-                defender['hp'] -= dmg
-                log_msg = f"🤧 <b>{attacker['name']}</b> чихнул и стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
+                if is_karma_dodge:
+                    log_msg = f"💨 {defender['name']} (Карма) ловко увернулся от божественного навыка!"
+                else:
+                    dmg = int(defender['max_hp'] * 0.99)
+                    defender['hp'] -= dmg
+                    log_msg = f"🤧 <b>{attacker['name']}</b> чихнул и стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
+                    
             elif r_type == "berserk":
                 attacker['cd'] = 3
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
+                elif is_karma_dodge:
+                    log_msg = f"💨 {defender['name']} (Карма) ловко увернулся от навыка «JUDGMENT!»"
                 else:
                     defender['hp'] -= 40
                     log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 40 урона!"
+                    
             elif r_type == "enrage": 
                 attacker['cd'] = 3
-                defender['stun'] = True
-                defender['hp'] -= 15 
-                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 15 урона! {defender['name']} оглушен!"
+                if is_karma_dodge:
+                    log_msg = f"💨 {defender['name']} (Карма) ловко увернулся от Кнаклбластера!"
+                else:
+                    defender['stun'] = True
+                    defender['hp'] -= 15 
+                    log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 15 урона! {defender['name']} оглушен!"
+                    
             elif r_type == "vampire": 
                 attacker['cd'] = 3
                 attacker['parry'] = True
                 log_msg = f"🪙 {attacker['name']} готовится парировать следующую атаку!"
+                
             elif r_type == "karma": 
                 attacker['cd'] = 3
-                defender['blind'] = True
-                log_msg = f"🦴 {attacker['name']} снижает точность {defender['name']}!"
+                if is_karma_dodge:
+                    log_msg = f"💨 {defender['name']} (Карма) избежал эффекта ослепления!"
+                else:
+                    defender['blind'] = True
+                    log_msg = f"🦴 {attacker['name']} снижает точность {defender['name']}!"
+                    
             elif r_type == "light": 
                 attacker['cd'] = 1
                 attacker['niko_dodge'] = True
                 log_msg = f"💡 {attacker['name']} готовится увернуться."
+                
             elif r_type == "souls": 
                 attacker['cd'] = 2
                 heal = int(attacker['max_hp'] * 0.25)
