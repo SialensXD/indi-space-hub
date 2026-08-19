@@ -99,7 +99,7 @@ from aiogram.types import Message
 ALLOWED_GROUPS = [-1003994387386]
 
 class AntiTheftMiddleware(BaseMiddleware):
-    async def call(self, handler, event, data):
+    async def __call__(self, handler, event, data):
         # Проверяем только входящие сообщения
         if isinstance(event, Message):
             chat = event.chat
