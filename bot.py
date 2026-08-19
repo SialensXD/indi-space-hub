@@ -1232,8 +1232,8 @@ async def cb_fight(callback: types.CallbackQuery):
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
                 else:
-                    defender['hp'] -= 50
-                    log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 50 урона!"
+                    defender['hp'] -= 40
+                    log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 40 урона!"
             elif r_type == "enrage": 
                 attacker['cd'] = 3
                 defender['stun'] = True
