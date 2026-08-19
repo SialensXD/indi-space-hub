@@ -1565,20 +1565,17 @@ async def cb_fight(callback: types.CallbackQuery):
             is_karma_dodge = (defender['type'] == 'karma' and random.random() < 0.97)
 
             if r_type == "god": 
-                attacker['cd'] = 1
-                if is_karma_dodge:
-                    log_msg = f"💨 {defender['name']} (Карма) ловко увернулся от божественного навыка!"
-                else:
-                    dmg = int(defender['max_hp'] * 0.99)
-                    defender['hp'] -= dmg
-                    log_msg = f"🤧 <b>{attacker['name']}</b> чихнул и стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
+                attacker['cd'] = 0
+                dmg = int(defender['max_hp'] * 0.99)
+                defender['hp'] -= dmg
+                log_msg = f"🤧 <b>{attacker['name']}</b> чихнул и стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
                     
             elif r_type == "berserk":
                 attacker['cd'] = 3
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
                 elif is_karma_dodge:
-                    log_msg = f"💨 {defender['name']} (Карма) ловко увернулся от навыка «JUDGMENT!»"
+                    log_msg = f"💨 {defender['name']} ловко увернулся от Жажмента"
                 else:
                     defender['hp'] -= 40
                     log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 40 урона!"
@@ -1586,7 +1583,7 @@ async def cb_fight(callback: types.CallbackQuery):
             elif r_type == "enrage": 
                 attacker['cd'] = 3
                 if is_karma_dodge:
-                    log_msg = f"💨 {defender['name']} (Карма) ловко увернулся от Кнаклбластера!"
+                    log_msg = f"💨 {defender['name']} ловко увернулся от Кнаклбластера!"
                 else:
                     defender['stun'] = True
                     defender['hp'] -= 15 
@@ -1599,11 +1596,8 @@ async def cb_fight(callback: types.CallbackQuery):
                 
             elif r_type == "karma": 
                 attacker['cd'] = 3
-                if is_karma_dodge:
-                    log_msg = f"💨 {defender['name']} (Карма) избежал эффекта ослепления!"
-                else:
-                    defender['blind'] = True
-                    log_msg = f"🦴 {attacker['name']} снижает точность {defender['name']}!"
+                defender['blind'] = True
+                log_msg = f"🦴 {attacker['name']} снижает точность {defender['name']}!"
                     
             elif r_type == "light": 
                 attacker['cd'] = 1
