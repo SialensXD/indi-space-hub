@@ -27,6 +27,15 @@ import random
 
 import math
 
+def parse_time(time_str: str) -> timedelta:
+    """Парсит строки типа '10m', '2h', '1d' в timedelta"""
+    unit = time_str[-1].lower()
+    value = int(time_str[:-1])
+    if unit == 'м': return timedelta(minutes=value)
+    elif unit == 'ч': return timedelta(hours=value)
+    elif unit == 'д': return timedelta(days=value)
+    else: return timedelta(minutes=value) # По умолчанию минуты
+
 def get_level(xp):
     """Высчитывает текущий уровень по квадратичной формуле"""
     if xp < 5:
@@ -481,6 +490,159 @@ async def cb_equip_title(callback: types.CallbackQuery):
     await callback.message.delete()
 
 # --- АДМИН КОМАНДЫ ---
+
+@dp.message(Command("chatid"))
+async def cmd_chatid(message: types.Message):
+    # Работает только для тебя
+    if message.from_user.id == 7857165309:
+        await message.answer(f"ID этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
+
+# --- СИСТЕМА МОДЕРАЦИИ ---
+
+async def log_mod_action(target_id: int, target_name: str, admin_name: str, action: str, reason: str):
+    """Записывает действие в дневник"""
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO mod_logs (target_id, target_username, admin_username, action, reason) VALUES ($1, $2, $3, $4, $5)",
+            target_id, target_name, admin_name, action, reason
+        )
+
+@dp.message(Command("warn"))
+async def cmd_warn(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    if not message.reply_to_message:
+        await message.answer("⚠️ Ответь на сообщение нарушителя!")
+        return
+
+    target = message.reply_to_message.from_user
+    reason = message.text.replace("/warn", "").strip() or "Причина не указана"
+    admin_name = message.from_user.username or "Admin"
+
+    async with db_pool.acquire() as conn:
+        # Прибавляем варн и возвращаем их новое количество
+        warns = await conn.fetchval(
+            "UPDATE users SET warns = COALESCE(warns, 0) + 1 WHERE user_id = $1 RETURNING warns",
+            target.id
+        )
+    
+    if not warns:
+        await message.answer("❌ Пользователя нет в бд.")
+        return
+
+    await log_mod_action(target.id, target.first_name, admin_name, "WARN", reason)
+
+    if warns >= 4:
+        # АВТОМУТ НА НЕДЕЛЮ
+        until_date = datetime.now(timezone.utc) + timedelta(days=7)
+        await message.chat.restrict(
+            target.id,
+            until_date=until_date,
+            permissions=types.ChatPermissions(can_send_messages=False)
+        )
+        # Сбрасываем варны обратно в 0
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET warns = 0 WHERE user_id = $1", target.id)
+            
+        await log_mod_action(target.id, target.first_name, "SYSTEM", "MUTE (2д)", "Достигнут лимит варнов (4/4)")
+        await message.answer(f"⛓ <b>{target.first_name}</b> получил 4-й варн и отправляется в мут на 2 дня! У тебя есть время обдумать свое поведение.😘", parse_mode="HTML")
+
+@dp.message(Command("unwarn"))
+async def cmd_unwarn(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    if not message.reply_to_message:
+        return await message.answer("⚠️ Ответь на сообщение того, кого хочешь Анварнуть.")
+
+    target = message.reply_to_message.from_user
+    admin_name = message.from_user.username or "Admin"
+    reason = message.text.replace("/unwarn", "").strip() or "Амнистия"
+
+    async with db_pool.acquire() as conn:
+        # Убавляем варн, но не даем уйти в минус (GREATEST выбирает наибольшее число)
+        warns = await conn.fetchval(
+            "UPDATE users SET warns = GREATEST(COALESCE(warns, 0) - 1, 0) WHERE user_id = $1 RETURNING warns",
+            target.id
+        )
+        
+    if warns is None:
+        return await message.answer("❌ Пользователя нет в бд.")
+
+    await log_mod_action(target.id, target.first_name, admin_name, "UNWARN", reason)
+    await message.answer(f"🕊 <b>{target.first_name}</b> прощен админом. Один варн снят!\nТекущие варны: {warns}/4\n📝 Причина: {reason}", parse_mode="HTML")
+
+@dp.message(Command("mute"))
+async def cmd_mute(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    if not message.reply_to_message:
+        return await message.answer("⚠️ Ответь на сообщение нарушителя! Формат: /mute 1h причина")
+
+    args = message.text.split(maxsplit=2)
+    if len(args) < 2:
+        return await message.answer("⚠️ Укажи время! Например: 15м, 2ч, 1д")
+
+    target = message.reply_to_message.from_user
+    time_str = args[1]
+    reason = args[2] if len(args) > 2 else "Не указана"
+    admin_name = message.from_user.username or "Admin"
+
+    try:
+        delta = parse_time(time_str)
+        until_date = datetime.now(timezone.utc) + delta
+    except ValueError:
+        return await message.answer("❌ Кривой формат времени. Используй числа + м,ч,д (10м, 2ч).")
+
+    # Мутим в самом Телеграме
+    await message.chat.restrict(
+        target.id,
+        until_date=until_date,
+        permissions=types.ChatPermissions(can_send_messages=False)
+    )
+    
+    await log_mod_action(target.id, target.first_name, admin_name, f"MUTE ({time_str})", reason)
+    await message.answer(f"🤐 <b>{target.first_name}</b> отправлен в мут на {time_str}.\n📝 Причина: {reason}", parse_mode="HTML")
+
+@dp.message(Command("ban"))
+async def cmd_ban(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    if not message.reply_to_message:
+        return await message.answer("⚠️ Ответь на сообщение нарушителя!")
+
+    target = message.reply_to_message.from_user
+    reason = message.text.replace("/ban", "").strip() or "Не указана"
+    admin_name = message.from_user.username or "Admin"
+
+    await message.chat.ban(target.id)
+    await log_mod_action(target.id, target.first_name, admin_name, "BAN", reason)
+    await message.answer(f"🔨 <b>{target.first_name}</b> забанен админом.\n📝 Причина: {reason}", parse_mode="HTML")
+@dp.message(Command("diary", "logs"))
+async def cmd_diary(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    if not message.reply_to_message:
+        return await message.answer("⚠️ Ответь на сообщние типа, чью историю хочешь посмотреть.")
+
+    target_id = message.reply_to_message.from_user.id
+    target_name = message.reply_to_message.from_user.first_name
+
+    async with db_pool.acquire() as conn:
+        # Достаем последние 5 записей
+        logs = await conn.fetch(
+            "SELECT action, admin_username, reason, created_at FROM mod_logs WHERE target_id = $1 ORDER BY created_at DESC LIMIT 5",
+            target_id
+        )
+        warns = await conn.fetchval("SELECT warns FROM users WHERE user_id = $1", target_id)
+
+    warns = warns or 0
+    text = f"📖 <b>Досье на {target_name}</b>\nТекущие варны: {warns}/4\n\n"
+
+    if not logs:
+        text += "<i>Абсолютно чист. Это же ангел во плоти. 👼</i>"
+    else:
+        for log in logs:
+            # Форматируем время в красивый вид (ММ-ДД ЧЧ:ММ)
+            dt = log['created_at'].strftime("%m-%d %H:%M")
+            text += f"[{dt}] <b>{log['action']}</b> от @{log['admin_username']}\n└ <i>{log['reason']}</i>\n\n"
+
+    await message.answer(text, parse_mode="HTML")
+
 @dp.message(Command("reset"))
 async def cmd_reset(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]:
