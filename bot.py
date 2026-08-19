@@ -86,7 +86,7 @@ CHARACTERS = {
     3: {"hp": 50, "max_hp": 50, "atk": 5, "type": "karma"},      
     4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"}, 
     5: {"hp": 125, "max_hp": 130, "atk": 15, "type": "enrage"},  
-    6: {"hp": 150, "max_hp": 150, "atk": 20, "type": "berserk"},
+    6: {"hp": 140, "max_hp": 140, "atk": 19, "type": "berserk"},
     # МОЯ АДМИНСКАЯ РОЛЬ
     999: {"hp": 9999, "max_hp": 9999, "atk": 9999, "type": "god"} 
 }
@@ -1162,9 +1162,9 @@ async def cb_fight(callback: types.CallbackQuery):
                 attacker['hp'] -= 9999
                 log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> расщеплен на атомы (-9999 HP)."
             else:
-                dmg = max(0, attacker['atk'] + random.randint(-2, 3))
+                dmg = max(0, attacker['atk'] + random.randint(-1, 1))
                 
-                if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 2):
+                if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 3):
                     dmg += 7
                     log_msg = f"💢 V2 В ЯРОСТИ! "
                 
@@ -1182,7 +1182,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 # --- ЛОГИКА ПАРИРОВАНИЯ И ГИФКИ V1 ---
                 elif defender['parry']:
                     defender['parry'] = False 
-                    if random.random() < 0.5:
+                    if random.random() < 1.0:
                         reflected_dmg = dmg 
                         attacker['hp'] -= reflected_dmg 
                         dmg = 0 
@@ -1226,7 +1226,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 attacker['cd'] = 1
                 dmg = int(defender['max_hp'] * 0.99)
                 defender['hp'] -= dmg
-                log_msg = f"🤧 <b>{attacker['name']}</b> стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
+                log_msg = f"🤧 <b>{attacker['name']}</b> чихнул и стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
             elif r_type == "berserk":
                 attacker['cd'] = 3
                 if random.random() < 0.35:
