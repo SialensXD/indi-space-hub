@@ -536,6 +536,63 @@ async def cmd_reroll_shop(message: types.Message):
     await refresh_shop_if_needed()
     
     await message.answer("🔄 Витрина Магазина принудительно обновлена! (Админ абьюз).")
+
+# --- ГЕНЕРАТОР ВКЛАДОК ТОПА ---
+def get_top_keyboard(current_tab="xp"):
+    builder = InlineKeyboardBuilder()
+    # Подсвечиваем активную вкладку галочкой
+    builder.button(text="✅ ⭐️ Опыт" if current_tab == "xp" else "⭐️ Опыт", callback_data="top_xp")
+    builder.button(text="✅ 🏆 Победы" if current_tab == "wins" else "🏆 Победы", callback_data="top_wins")
+    builder.button(text="✅ 💬 Актив" if current_tab == "msg" else "💬 Актив", callback_data="top_msg")
+    builder.adjust(3)
+    return builder.as_markup()
+
+# Универсальная функция отрисовки топа
+async def render_top(event, tab, is_edit=False):
+    queries = {
+        "xp": ("xp", "⭐️ ОПЫТУ", "XP"),
+        "wins": ("wins", "🏆 ПОБЕДАМ НА АРЕНЕ", "побед"),
+        "msg": ("msg_count", "💬 АКТИВНОСТИ В ЧАТЕ", "сообщений")
+    }
+    col, title, suffix = queries[tab]
+    
+    async with db_pool.acquire() as conn:
+        # Вытаскиваем топ-10, у кого значение больше нуля
+        users = await conn.fetch(f"""
+            SELECT username, COALESCE({col}, 0) as val 
+            FROM users 
+            WHERE {col} IS NOT NULL AND {col} > 0 
+            ORDER BY {col} DESC LIMIT 10
+        """)
+    
+    text = f"📊 <b>ТОП-10 ИГРОКОВ ПО {title}</b>\n\n"
+    if not users:
+        text += "<i>Пока что тут пусто...</i>"
+    else:
+        for i, u in enumerate(users, 1):
+            # Медали для первой тройки
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            name = u['username'] or "Аноним"
+            text += f"{medal} <b>{name}</b> — {u['val']} {suffix}\n"
+    
+    kb = get_top_keyboard(tab)
+    
+    if is_edit:
+        await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await event.answer()
+    else:
+        await event.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@dp.message(Command("top"))
+async def cmd_top(message: types.Message):
+    # По умолчанию открываем топ по опыту
+    await render_top(message, "xp", is_edit=False)
+
+@dp.callback_query(F.data.startswith("top_"))
+async def cb_top_tab(callback: types.CallbackQuery):
+    tab = callback.data.split("_")[1]
+    await render_top(callback, tab, is_edit=True)
+
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -549,13 +606,13 @@ async def callbacks_num(callback: types.CallbackQuery):
     if role_id == 999:
         if user_id != ADMIN_ID:
             mockery = [
-                "🤡 Губу раскатал! Эта роль только для моего Создателя.",
+                "🤡 Губу раскатал! Эта роль только для всемилюбимого Создателя.",
                 "⚡️ Твоё смертное тело не выдержит эту силу. Выбери что-то попроще, гой.",
-                "🤣 ПХАХХАХА, не-а. Иди играй за Санса, мамин хакер.",
-                "🛑 ОШИБКА ДОСТУПА. Уровень прав: ПЕШКА. Требуется: БОГ."
+                "🤣 ПХАХХАХА, не-а. Иди играй за Санса, упырь.",
+                "🛑 ОШИБКА ДОСТУПА. Уровень прав: ОСЕЛ. Требуется: БОГ."
             ]
             await callback.answer(random.choice(mockery), show_alert=True)
-            return # Обрываем код, роль не выдается
+            return 
         else:
             await callback.answer("Добро пожаловать в режим Бога, Создатель. 👑", show_alert=True)
     # ---------------------------------
@@ -661,7 +718,7 @@ async def cb_fight(callback: types.CallbackQuery):
     is_p2 = (user_id == duel['p2']['id'])
     
     if not (is_p1 or is_p2):
-        await callback.answer("Ты не участвуешь в этом бою! 🍿", show_alert=True)
+        await callback.answer("Ты не участвуешь в этом бою! 👺", show_alert=True)
         return
         
     if duel['turn'] != user_id:
@@ -833,7 +890,7 @@ async def cb_fight(callback: types.CallbackQuery):
         )
         
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2 WHERE user_id = $3", win_credits, win_xp, winner['id'])
+            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2, wins = COALESCE(wins, 0) + 1 WHERE user_id = $3", win_credits, win_xp, winner['id'])
             
         del active_duels[duel_id]
         
@@ -952,7 +1009,7 @@ async def cb_use_item(callback: types.CallbackQuery):
         )
         
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2 WHERE user_id = $3", win_credits, win_xp, winner['id'])
+            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2, wins = COALESCE(wins, 0) + 1 WHERE user_id = $3", win_credits, win_xp, winner['id'])
             
         del active_duels[duel_id]
         try:
@@ -978,6 +1035,17 @@ async def cb_use_item(callback: types.CallbackQuery):
         await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
         
     await callback.answer("Предмет использован!")
+
+@dp.message(F.text & ~F.text.startswith('/'))
+async def track_messages(message: types.Message):
+    # Работает только если у юзера уже есть профиль в базе
+    user_id = message.from_user.id
+    async with db_pool.acquire() as conn:
+        # Пытаемся обновить, игнорируем ошибки, чтобы не крашить бота при спаме
+        try:
+            await conn.execute("UPDATE users SET msg_count = COALESCE(msg_count, 0) + 1 WHERE user_id = $1", user_id)
+        except:
+            pass
 
 # --- СЕРВЕР ---
 async def health_check(request):
