@@ -92,6 +92,38 @@ SKILL_GIFS = {
 # --- МАГАЗИН ---
 shop_data = {"items": [], "titles": [], "last_update": datetime.now(timezone.utc)}
 
+from aiogram import BaseMiddleware
+from aiogram.types import Message
+
+# ID моего чата (или нескольких чатов)
+ALLOWED_GROUPS = [-1003994387386]
+
+class AntiTheftMiddleware(BaseMiddleware):
+    async def call(self, handler, event, data):
+        # Проверяем только входящие сообщения
+        if isinstance(event, Message):
+            chat = event.chat
+            
+            # 1. Если это личка (ЛС) - пускаем
+            if chat.type == 'private':
+                return await handler(event, data)
+            
+            # 2. Если это группа, проверяем, есть ли она в белом списке
+            if chat.id in ALLOWED_GROUPS:
+                return await handler(event, data)
+                
+            # 3. Если группа чужая — караем
+            try:
+                logging.warning(f"🚨 Опа, у нас тут попытка угона! Чат: {chat.title} ({chat.id})")
+                await event.answer("Я предусмотрел и такое. Бот в чужих чатах не работает. С любовью, Ваш Сиаленс))).")
+                await event.bot.leave_chat(chat.id) # Бот сам выходит из группы
+            except Exception:
+                pass
+            return # Прерываем цепочку, команды не выполнятся
+            
+        # Для callback-кнопок и прочего просто пропускаем дальше
+        return await handler(event, data)
+
 # --- БАЗА ДАННЫХ (POSTGRESQL) ---
 async def init_db():
     global db_pool
@@ -491,11 +523,6 @@ async def cb_equip_title(callback: types.CallbackQuery):
 
 # --- АДМИН КОМАНДЫ ---
 
-@dp.message(Command("chatid"))
-async def cmd_chatid(message: types.Message):
-    # Работает только для тебя
-    if message.from_user.id == 7857165309:
-        await message.answer(f"ID этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
 
 # --- СИСТЕМА МОДЕРАЦИИ ---
 
@@ -1222,6 +1249,7 @@ async def on_startup(bot: Bot):
 
 def main():
     dp.startup.register(on_startup)
+    dp.message.middleware(AntiTheftMiddleware())
     app = web.Application()
     app.router.add_get('/', health_check)
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
