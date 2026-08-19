@@ -11,6 +11,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.types import BotCommand
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
@@ -26,6 +27,18 @@ db_pool = None
 import random
 
 import math
+
+import re
+
+# Кэш триггеров в ОЗУ
+TRIGGERS_CACHE = {}
+
+async def load_triggers_cache():
+    global TRIGGERS_CACHE
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT phrase, reply_text FROM triggers")
+        TRIGGERS_CACHE = {r['phrase']: r['reply_text'] for r in rows}
+    logging.info(f"Кэш триггеров загружен: {len(TRIGGERS_CACHE)} шт.")
 
 def parse_time(time_str: str) -> timedelta:
     """Парсит строки типа '10m', '2h', '1d' в timedelta"""
@@ -104,7 +117,7 @@ class AntiTheftMiddleware(BaseMiddleware):
         if isinstance(event, Message):
             chat = event.chat
             
-            # 1. Если это личка (ЛС) - пускаем
+            # 1. Если это ЛС - пускаем
             if chat.type == 'private':
                 return await handler(event, data)
             
@@ -115,7 +128,7 @@ class AntiTheftMiddleware(BaseMiddleware):
             # 3. Если группа чужая — караем
             try:
                 logging.warning(f"🚨 Опа, у нас тут попытка угона! Чат: {chat.title} ({chat.id})")
-                await event.answer("Я предусмотрел и такое. \nБот в чужих чатах не работает. \nС любовью, Ваш Сиаленс😘")
+                await event.answer("🧿Попытка угона? Я предусмотрел и такое. \nБот в чужих чатах не работает. \nС любовью, Ваш Сиаленс😘")
                 await event.bot.leave_chat(chat.id) # Бот сам выходит из группы
             except Exception:
                 pass
@@ -260,6 +273,18 @@ def get_duel_keyboard(duel_id: str):
     builder.adjust(2, 2)
     return builder.as_markup()
 
+async def setup_bot_commands(bot: Bot):
+    commands = [
+        BotCommand(command="start", description="🚀 Проверка/список (ЛС онли)"),
+        BotCommand(command="role", description="🎭 Выбрать/сменить персонажа"),
+        BotCommand(command="profile", description="👤 Профиль, статы и рюкзак"),
+        BotCommand(command="daily", description="🎁 Забрать ежедневную награду"),
+        BotCommand(command="shop", description="🏪 Магазин предметов и титулов"),
+        BotCommand(command="duel", description="⚔️ Вызвать игрока (ответом на сообщение)"),
+        BotCommand(command="top", description="📊 Топ игроков чата"),
+        BotCommand(command="title", description="👑 Управление титулами"),
+    ]
+    await bot.set_my_commands(commands)
 
 # --- ГЕНЕРАТОР ВКЛАДОК МАГАЗИНА ---
 def get_shop_keyboard(category="items"):
@@ -798,7 +823,6 @@ async def cmd_add_trigger(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]:
         return
 
-    # Формат: /addtrigger триггер | ответ
     raw_text = message.text.replace("/addtrigger", "").strip()
     if "|" not in raw_text:
         await message.answer("⚠️ Использование: <code>/addtrigger ключевое слово | ответ картера</code>", parse_mode="HTML")
@@ -817,6 +841,7 @@ async def cmd_add_trigger(message: types.Message):
             phrase_clean, reply
         )
 
+    TRIGGERS_CACHE[phrase_clean] = reply # Сразу обновляем память
     await message.answer(f"✅ Триггер создан!\n<b>Ключ:</b> <code>{phrase_clean}</code>\n<b>Ответ:</b> {reply}", parse_mode="HTML")
 
 @dp.message(Command("deltrigger"))
@@ -833,22 +858,20 @@ async def cmd_del_trigger(message: types.Message):
         res = await conn.execute("DELETE FROM triggers WHERE phrase = $1", phrase_clean)
 
     if res == "DELETE 1":
-        await message.answer(f"🗑 Триггер <code>{phrase_clean}</code> успешно удален!", parse_mode="HTML")
+        TRIGGERS_CACHE.pop(phrase_clean, None) # Удаляем из памяти
+        await message.answer(f"🗑 Триггер <code>{phrase_clean}</code> удален!", parse_mode="HTML")
     else:
-        await message.answer("❌ Нету такого триггера.")
+        await message.answer("❌ Такой триггер не найден.")
 
 @dp.message(Command("triggers"))
 async def cmd_list_triggers(message: types.Message):
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT phrase, reply_text FROM triggers ORDER BY id ASC")
-
-    if not rows:
-        await message.answer("Список триггеров пока пуст.")
+    if not TRIGGERS_CACHE:
+        await message.answer("Список триггеров пуст.")
         return
 
     text = "🗣 <b>Активные триггеры чата:</b>\n\n"
-    for r in rows:
-        text += f"• <code>{r['phrase']}</code> ➔ <i>{r['reply_text']}</i>\n"
+    for phrase, reply in TRIGGERS_CACHE.items():
+        text += f"• <code>{phrase}</code> ➔ <i>{reply}</i>\n"
 
     await message.answer(text, parse_mode="HTML")
 
@@ -1437,19 +1460,20 @@ async def track_messages(message: types.Message):
     user_id = message.from_user.id
     msg_text = message.text.lower()
 
+    # 1. Счечик сообщений для /top
     async with db_pool.acquire() as conn:
-        # 1. Учет счетчика сообщений юзера
         try:
             await conn.execute("UPDATE users SET msg_count = COALESCE(msg_count, 0) + 1 WHERE user_id = $1", user_id)
         except Exception:
             pass
 
-        # 2. Проверка триггеров в БД
-        triggers = await conn.fetch("SELECT phrase, reply_text FROM triggers")
-        for t in triggers:
-            if t['phrase'] in msg_text:
-                await message.reply(t['reply_text'], parse_mode="HTML")
-                break # Отвечаем на первый найденный триггер
+    # 2. Мгновенная проверка триггеров из ОЗУ по отдельным словам
+    for phrase, reply_text in TRIGGERS_CACHE.items():
+        # Регулярка изолирует слово/фразу со всех сторон от букв и цифр
+        pattern = rf'(?<!\w){re.escape(phrase)}(?!\w)'
+        if re.search(pattern, msg_text):
+            await message.reply(reply_text, parse_mode="HTML")
+            break
 
 # --- СЕРВЕР ---
 async def health_check(request):
@@ -1457,7 +1481,9 @@ async def health_check(request):
 
 async def on_startup(bot: Bot):
     await init_db()
-    await refresh_shop_if_needed() # <--- ДОБАВЬ ЭТО
+    await refresh_shop_if_needed()
+    await load_triggers_cache()
+    await setup_bot_commands(bot) # Регистр меню команд
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
     if base_url:
         await bot.set_webhook(f"{base_url}{WEBHOOK_PATH}", drop_pending_updates=True)
