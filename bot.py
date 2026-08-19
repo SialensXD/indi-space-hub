@@ -117,6 +117,16 @@ from aiogram.types import Message
 # ID моего чата (или нескольких чатов)
 ALLOWED_GROUPS = [-1003994387386]
 
+def generate_progress_bar(current, target, length=10):
+    if target <= 0:
+        return "█" * length
+    # Защита от переполнения бара
+    progress = min(1.0, current / target)
+    filled_blocks = int(length * progress)
+    empty_blocks = length - filled_blocks
+    # Используем символы ASCII-графики
+    return f"[{'█' * filled_blocks}{'░' * empty_blocks}]"
+
 class AntiTheftMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         # Проверяем только входящие сообщения
@@ -455,41 +465,66 @@ async def cmd_profile(message: types.Message):
             JOIN items ON inventory.item_id = items.id 
             WHERE user_id = $1 AND count > 0
         """, user_id)
+
+    # Красивый вывод инвентаря
+    if inv_items:
+        inv_text = "\n".join([f"🔸 <b>{item['name']}</b>: <code>{item['total_count']} шт.</code>" for item in inv_items])
+    else:
+        inv_text = "<i>Пусто...</i>"
+        
+    # Генерируем полоску опыта
+    xp_bar = generate_progress_bar(xp_val, next_xp, length=12)
     
-    inv_text = "\n".join([f"🎒 {item['name']}: {item['total_count']} шт." for item in inv_items]) or "🎒 Пусто"
-    
+    # Собираем красивую "карточку"
     status = (
-        f"🏆 Титул: <b>{current_title}</b>\n"
-        f"🎭 Персонаж: {role_str}\n"
-        f"💳 Кредиты: {credits_val} 💰\n"
-        f"⭐️ Опыт: {xp_val} XP <i>(до {lvl+1} ур: {left_xp} XP)</i>\n"
-        f"💬 Сообщений: {msg_count}\n"
-        f"🔄 Смен роли: {left_changes}/1\n\n"
-        f"<b>Твой рюкзак:</b>\n{inv_text}"
+        f"🪪 <b>КАРТОЧКА ИГРОКА: {message.from_user.first_name}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎭 <b>Роль:</b> {role_str}\n"
+        f"👑 <b>Титул:</b> {current_title}\n\n"
+        f"📊 <b>СТАТИСТИКА</b>\n"
+        f"├ 💬 Сообщений: <code>{msg_count}</code>\n"
+        f"├ 💳 Баланс: <code>{credits_val}</code> 💰\n"
+        f"└ 🔄 Смен роли: <code>{left_changes}/1</code>\n\n"
+        f"✨ <b>УРОВЕНЬ {lvl}</b>\n"
+        f"<code>{xp_bar}</code>\n"
+        f"<i>{xp_val} / {next_xp} XP (до апгрейда: {left_xp})</i>\n\n"
+        f"🎒 <b>ИНВЕНТАРЬ</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{inv_text}"
     )
     
     # Кнопка для настройки уведомлений
     builder = InlineKeyboardBuilder()
-    notif_text = "🔕 Выключить ЛС-рассылку" if notif_enabled else "🔔 Включить ЛС-рассылку"
+    notif_text = "🔕 Выключить рассылку" if notif_enabled else "🔔 Включить рассылку"
     builder.button(text=notif_text, callback_data="toggle_notif")
     
-    await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", reply_markup=builder.as_markup(), parse_mode="HTML")
+    # Отправляем обновленный профиль
+    await message.answer(status, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-# Хендлер для переключения уведомлений
 @dp.callback_query(F.data == "toggle_notif")
 async def cb_toggle_notif(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    
     async with db_pool.acquire() as conn:
+        # Узнаем текущий статус и меняем на противоположный
         current_status = await conn.fetchval("SELECT notifications_enabled FROM users WHERE user_id = $1", user_id)
         new_status = not current_status
         await conn.execute("UPDATE users SET notifications_enabled = $1 WHERE user_id = $2", new_status, user_id)
     
+    # Показываем всплывающее уведомление
     status_msg = "включены ✅" if new_status else "выключены ❌"
-    await callback.answer(f"Рассылка об обновлениях магазина {status_msg}!", show_alert=True)
+    await callback.answer(f"Рассылка {status_msg}!", show_alert=True)
     
-    # Обновляем профиль чтобы кнопка поменяла название
-    await cmd_profile(callback.message)
-    await callback.message.delete()
+    # Формируем новую кнопку
+    builder = InlineKeyboardBuilder()
+    notif_text = "🔕 Выключить рассылку" if new_status else "🔔 Включить рассылку"
+    builder.button(text=notif_text, callback_data="toggle_notif")
+    
+    # Элегантно обновляем только клавиатуру под сообщением
+    try:
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+    except Exception:
+        pass # Игнорируем ошибку, если вдруг API телеграма ругнется на то, что клавиатура не изменилась
     
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
