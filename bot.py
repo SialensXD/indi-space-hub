@@ -115,7 +115,7 @@ class AntiTheftMiddleware(BaseMiddleware):
             # 3. Если группа чужая — караем
             try:
                 logging.warning(f"🚨 Опа, у нас тут попытка угона! Чат: {chat.title} ({chat.id})")
-                await event.answer("Я предусмотрел и такое. \nБот в чужих чатах не работает. \nС любовью, Ваш Сиаленс)))")
+                await event.answer("Я предусмотрел и такое. \nБот в чужих чатах не работает. \nС любовью, Ваш Сиаленс😘")
                 await event.bot.leave_chat(chat.id) # Бот сам выходит из группы
             except Exception:
                 pass
@@ -534,123 +534,203 @@ async def log_mod_action(target_id: int, target_name: str, admin_name: str, acti
             target_id, target_name, admin_name, action, reason
         )
 
+async def get_target_and_args(message: types.Message):
+    """
+    Универсально достает target_id, target_name и оставшиеся аргументы.
+    Поддерживает как Reply на сообщение, так и выборку по @username из БД.
+    """
+    args = message.text.split()[1:]
+    
+    # 1. Если команда отправлена в ответ на сообщение
+    if message.reply_to_message:
+        target = message.reply_to_message.from_user
+        name = f"@{target.username}" if target.username else target.first_name
+        return target.id, name, args
+
+    # 2. Если передан @username первой переменной
+    if args:
+        possible_user = args[0]
+        clean_username = possible_user.lstrip("@").lower()
+        
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT user_id, username FROM users WHERE LOWER(username) = $1",
+                clean_username
+            )
+        if row:
+            return row['user_id'], f"@{row['username']}", args[1:]
+        elif possible_user.startswith("@"):
+            await message.answer(f"❌ Пользователь {possible_user} не найден в базе данных.")
+            return None, None, None
+
+    await message.answer("⚠️ Ответь на сообщение или укажи @username!")
+    return None, None, None
+
 @dp.message(Command("warn"))
 async def cmd_warn(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
-    if not message.reply_to_message:
-        await message.answer("⚠️ Ответь на сообщение нарушителя!")
-        return
+    
+    target_id, target_name, rem_args = await get_target_and_args(message)
+    if not target_id: return
 
-    target = message.reply_to_message.from_user
-    reason = message.text.replace("/warn", "").strip() or "Причина не указана"
+    reason = " ".join(rem_args) if rem_args else "Причина не указана"
     admin_name = message.from_user.username or "Admin"
 
     async with db_pool.acquire() as conn:
-        # Прибавляем варн и возвращаем их новое количество
         warns = await conn.fetchval(
             "UPDATE users SET warns = COALESCE(warns, 0) + 1 WHERE user_id = $1 RETURNING warns",
-            target.id
+            target_id
         )
     
-    if not warns:
+    if warns is None:
         await message.answer("❌ Пользователя нет в бд.")
         return
 
-    await log_mod_action(target.id, target.first_name, admin_name, "WARN", reason)
+    await log_mod_action(target_id, target_name, admin_name, "WARN", reason)
 
     if warns >= 4:
-        # АВТОМУТ НА НЕДЕЛЮ
-        until_date = datetime.now(timezone.utc) + timedelta(days=7)
-        await message.chat.restrict(
-            target.id,
-            until_date=until_date,
-            permissions=types.ChatPermissions(can_send_messages=False)
-        )
-        # Сбрасываем варны обратно в 0
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET warns = 0 WHERE user_id = $1", target.id)
+        # АВТОМУТ НА 2 ДНЯ
+        until_date = datetime.now(timezone.utc) + timedelta(days=2)
+        try:
+            await message.chat.restrict(
+                target_id,
+                until_date=until_date,
+                permissions=types.ChatPermissions(can_send_messages=False)
+            )
+        except Exception as e:
+            logging.error(f"Ошибка применения мута у Телеграма: {e}")
             
-        await log_mod_action(target.id, target.first_name, "SYSTEM", "MUTE (2д)", "Достигнут лимит варнов (4/4)")
-        await message.answer(f"⛓ <b>{target.first_name}</b> получил 4-й варн и отправляется в мут на 2 дня! У тебя есть время обдумать свое поведение.😘", parse_mode="HTML")
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET warns = 0 WHERE user_id = $1", target_id)
+            
+        await log_mod_action(target_id, target_name, "SYSTEM", "MUTE (2д)", "Достигнут лимит варнов (4/4)")
+        await message.answer(f"⛓ <b>{target_name}</b> получил 4-й варн и отправляется в мут на 2 дня! У тебя есть время обдумать свое поведение.😘", parse_mode="HTML")
+    else:
+        # Теперь бот не молчит при выдаче обычного варна
+        await message.answer(f"⚠️ <b>{target_name}</b> получил предупреждение ({warns}/4)!\n📝 Причина: {reason}", parse_mode="HTML")
 
 @dp.message(Command("unwarn"))
 async def cmd_unwarn(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
-    if not message.reply_to_message:
-        return await message.answer("⚠️ Ответь на сообщение того, кого хочешь Анварнуть.")
+    
+    target_id, target_name, rem_args = await get_target_and_args(message)
+    if not target_id: return
 
-    target = message.reply_to_message.from_user
     admin_name = message.from_user.username or "Admin"
-    reason = message.text.replace("/unwarn", "").strip() or "Амнистия"
-
+    reason = " ".join(rem_args) if rem_args else "Амнистия"
     async with db_pool.acquire() as conn:
-        # Убавляем варн, но не даем уйти в минус (GREATEST выбирает наибольшее число)
         warns = await conn.fetchval(
             "UPDATE users SET warns = GREATEST(COALESCE(warns, 0) - 1, 0) WHERE user_id = $1 RETURNING warns",
-            target.id
+            target_id
         )
         
     if warns is None:
         return await message.answer("❌ Пользователя нет в бд.")
 
-    await log_mod_action(target.id, target.first_name, admin_name, "UNWARN", reason)
-    await message.answer(f"🕊 <b>{target.first_name}</b> прощен админом. Один варн снят!\nТекущие варны: {warns}/4\n📝 Причина: {reason}", parse_mode="HTML")
+    await log_mod_action(target_id, target_name, admin_name, "UNWARN", reason)
+    await message.answer(f"🕊 <b>{target_name}</b> прощен админом. Один варн снят!\nТекущие варны: {warns}/4\n📝 Причина: {reason}", parse_mode="HTML")
 
 @dp.message(Command("mute"))
 async def cmd_mute(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
-    if not message.reply_to_message:
-        return await message.answer("⚠️ Ответь на сообщение нарушителя! Формат: /mute 1h причина")
+    
+    target_id, target_name, rem_args = await get_target_and_args(message)
+    if not target_id: return
 
-    args = message.text.split(maxsplit=2)
-    if len(args) < 2:
-        return await message.answer("⚠️ Укажи время! Например: 15м, 2ч, 1д")
+    if not rem_args:
+        return await message.answer("⚠️ Укажи время! Формат: /mute @user 1ч причина (или ответом: /mute 1ч причина)")
 
-    target = message.reply_to_message.from_user
-    time_str = args[1]
-    reason = args[2] if len(args) > 2 else "Не указана"
+    time_str = rem_args[0]
+    reason = " ".join(rem_args[1:]) if len(rem_args) > 1 else "Не указана"
     admin_name = message.from_user.username or "Admin"
 
     try:
         delta = parse_time(time_str)
         until_date = datetime.now(timezone.utc) + delta
     except ValueError:
-        return await message.answer("❌ Кривой формат времени. Используй числа + м,ч,д (10м, 2ч).")
+        return await message.answer("❌ Кривой формат времени. Используй числа + м,ч,д (10м, 2ч, 1д).")
 
-    # Мутим в самом Телеграме
-    await message.chat.restrict(
-        target.id,
-        until_date=until_date,
-        permissions=types.ChatPermissions(can_send_messages=False)
-    )
+    try:
+        await message.chat.restrict(
+            target_id,
+            until_date=until_date,
+            permissions=types.ChatPermissions(can_send_messages=False)
+        )
+    except Exception as e:
+        return await message.answer(f"❌ Не удалось выдаче мута: {e}")
     
-    await log_mod_action(target.id, target.first_name, admin_name, f"MUTE ({time_str})", reason)
-    await message.answer(f"🤐 <b>{target.first_name}</b> отправлен в мут на {time_str}.\n📝 Причина: {reason}", parse_mode="HTML")
+    await log_mod_action(target_id, target_name, admin_name, f"MUTE ({time_str})", reason)
+    await message.answer(f"🤐 <b>{target_name}</b> отправлен в мут на {time_str}.\n📝 Причина: {reason}", parse_mode="HTML")
+
+@dp.message(Command("unmute"))
+async def cmd_unmute(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    
+    target_id, target_name, rem_args = await get_target_and_args(message)
+    if not target_id: return
+
+    reason = " ".join(rem_args) if rem_args else "Амнистия"
+    admin_name = message.from_user.username or "Admin"
+
+    try:
+        await message.chat.restrict(
+            target_id,
+            permissions=types.ChatPermissions(
+                can_send_messages=True,
+                can_send_media_messages=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True
+            )
+        )
+    except Exception as e:
+        return await message.answer(f"❌ Ошибка размута: {e}")
+
+    await log_mod_action(target_id, target_name, admin_name, "UNMUTE", reason)
+    await message.answer(f"🔊 <b>{target_name}</b> снова может говорить!\n📝 Причина: {reason}", parse_mode="HTML")
 
 @dp.message(Command("ban"))
 async def cmd_ban(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
-    if not message.reply_to_message:
-        return await message.answer("⚠️ Ответь на сообщение нарушителя!")
+    
+    target_id, target_name, rem_args = await get_target_and_args(message)
+    if not target_id: return
 
-    target = message.reply_to_message.from_user
-    reason = message.text.replace("/ban", "").strip() or "Не указана"
+    reason = " ".join(rem_args) if rem_args else "Не указана"
     admin_name = message.from_user.username or "Admin"
 
-    await message.chat.ban(target.id)
-    await log_mod_action(target.id, target.first_name, admin_name, "BAN", reason)
-    await message.answer(f"🔨 <b>{target.first_name}</b> забанен админом.\n📝 Причина: {reason}", parse_mode="HTML")
+    try:
+        await message.chat.ban(target_id)
+    except Exception as e:
+        return await message.answer(f"❌ Ошибка бана: {e}")
+
+    await log_mod_action(target_id, target_name, admin_name, "BAN", reason)
+    await message.answer(f"🔨 <b>{target_name}</b> забанен админом.\n📝 Причина: {reason}", parse_mode="HTML")
+
+@dp.message(Command("unban"))
+async def cmd_unban(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
+    
+    target_id, target_name, rem_args = await get_target_and_args(message)
+    if not target_id: return
+
+    reason = " ".join(rem_args) if rem_args else "Амнистия"
+    admin_name = message.from_user.username or "Admin"
+    try:
+        await message.chat.unban(target_id, only_if_banned=True)
+    except Exception as e:
+        return await message.answer(f"❌ Ошибка разбана: {e}")
+
+    await log_mod_action(target_id, target_name, admin_name, "UNBAN", reason)
+    await message.answer(f"🔓 <b>{target_name}</b> разбанен!\n📝 Причина: {reason}", parse_mode="HTML")
+
 @dp.message(Command("diary", "logs"))
 async def cmd_diary(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]: return
-    if not message.reply_to_message:
-        return await message.answer("⚠️ Ответь на сообщние типа, чью историю хочешь посмотреть.")
-
-    target_id = message.reply_to_message.from_user.id
-    target_name = message.reply_to_message.from_user.first_name
+    
+    target_id, target_name, _ = await get_target_and_args(message)
+    if not target_id: return
 
     async with db_pool.acquire() as conn:
-        # Достаем последние 5 записей
         logs = await conn.fetch(
             "SELECT action, admin_username, reason, created_at FROM mod_logs WHERE target_id = $1 ORDER BY created_at DESC LIMIT 5",
             target_id
@@ -664,7 +744,6 @@ async def cmd_diary(message: types.Message):
         text += "<i>Абсолютно чист. Это же ангел во плоти. 👼</i>"
     else:
         for log in logs:
-            # Форматируем время в красивый вид (ММ-ДД ЧЧ:ММ)
             dt = log['created_at'].strftime("%m-%d %H:%M")
             text += f"[{dt}] <b>{log['action']}</b> от @{log['admin_username']}\n└ <i>{log['reason']}</i>\n\n"
 
