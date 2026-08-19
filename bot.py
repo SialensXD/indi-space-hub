@@ -24,6 +24,8 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 db_pool = None
 
+START_TIME = datetime.now(timezone.utc)
+
 import random
 
 import math
@@ -374,8 +376,24 @@ async def cb_buy(callback: types.CallbackQuery):
             await conn.execute("UPDATE users SET title_id = $1 WHERE user_id = $2", item_id, user_id)
             await callback.answer("👑 Титул куплен и торжественно надет!", show_alert=True)
             
-    # Обновляем текст в самом магазине, чтобы игрок видел, что кнопки работают
-    await callback.message.edit_text(callback.message.text + f"\n\n<i>{callback.from_user.first_name} только что что-то купил...</i>", reply_markup=callback.message.reply_markup, parse_mode="HTML")
+# Обновляем текст в магазине с группировкой сообщений
+    current_html = callback.message.html_text or callback.message.text
+    user_name = callback.from_user.first_name
+    
+    # Ищем, покупал ли уже этот юзер что-то (с учетом возможного множителя ×N)
+    pattern = rf"<i>{re.escape(user_name)} только что что-то купил(?:\s*×(\d+))?\.\.\.<\/i>"
+    match = re.search(pattern, current_html)
+    
+    if match:
+        # Если находим, вытаскиваем цифру, плюсуем 1 и заменяем старую строчку
+        count = int(match.group(1)) if match.group(1) else 1
+        new_text = re.sub(pattern, f"<i>{user_name} только что что-то купил ×{count + 1}...</i>", current_html)
+    else:
+        # Если не нашли, просто добавляем новую
+        new_text = current_html + f"\n\n<i>{user_name} только что что-то купил...</i>"
+        
+    await callback.message.edit_text(new_text, reply_markup=callback.message.reply_markup, parse_mode="HTML")
+    
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard(message.from_user.id)
@@ -457,6 +475,25 @@ async def cmd_start(message: types.Message):
     else:
         text = f" Приветствую, {message.from_user.first_name}! Картер в строю. Если нужна помощь, напиши мне в ЛС команду <code>/start</code>."
 
+    await message.answer(text, parse_mode="HTML")
+    
+@dp.message(Command("status", "ping"))
+async def cmd_status(message: types.Message):
+    # Высчитываем аптайм и убираем микросекунды для красоты
+    uptime = datetime.now(timezone.utc) - START_TIME
+    uptime = uptime - timedelta(microseconds=uptime.microseconds) 
+    
+    # Пинг высчитываем как разницу между временем отправки сообщения и текущим временем бота
+    ping_ms = (datetime.now(timezone.utc) - message.date).total_seconds() * 1000
+    
+    text = (
+        f"🤖 <b>Статус Картера:</b>\n\n"
+        f"🟢 <b>Состояние:</b> Онлайн\n"
+        f"⏱ <b>Аптайм:</b> {uptime}\n"
+        f"🏓 <b>Задержка:</b> ~{int(ping_ms)} мс\n"
+        f"🧠 <b>Триггеров в памяти:</b> {len(TRIGGERS_CACHE)} шт.\n"
+        f"⚔️ <b>Активных дуэлей:</b> {len(active_duels)}"
+    )
     await message.answer(text, parse_mode="HTML")
     
 @dp.message(Command("daily"))
