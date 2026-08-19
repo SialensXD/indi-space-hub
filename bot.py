@@ -115,7 +115,7 @@ class AntiTheftMiddleware(BaseMiddleware):
             # 3. Если группа чужая — караем
             try:
                 logging.warning(f"🚨 Опа, у нас тут попытка угона! Чат: {chat.title} ({chat.id})")
-                await event.answer("Я предусмотрел и такое. Бот в чужих чатах не работает. С любовью, Ваш Сиаленс))).")
+                await event.answer("Я предусмотрел и такое. \nБот в чужих чатах не работает. \nС любовью, Ваш Сиаленс)))")
                 await event.bot.leave_chat(chat.id) # Бот сам выходит из группы
             except Exception:
                 pass
