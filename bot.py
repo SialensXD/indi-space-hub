@@ -133,7 +133,6 @@ async def init_db():
     
     dsn = DATABASE_URL.replace("postgres://", "postgresql://")
     try:
-        # Добавили statement_cache_size=0 для работы с PgBouncer на Render
         db_pool = await asyncpg.create_pool(
             dsn=dsn,
             statement_cache_size=0
@@ -144,6 +143,13 @@ async def init_db():
                 WHERE a.ctid < b.ctid AND a.user_id = b.user_id;
                 
                 CREATE UNIQUE INDEX IF NOT EXISTS users_user_id_unique ON users (user_id);
+
+                -- Таблица для триггеров автоответа
+                CREATE TABLE IF NOT EXISTS triggers (
+                    id SERIAL PRIMARY KEY,
+                    phrase TEXT UNIQUE NOT NULL,
+                    reply_text TEXT NOT NULL
+                );
             """)
         logging.info("✅ Подключение к БД успешно!")
     except Exception as e:
@@ -787,6 +793,65 @@ async def cmd_diary(message: types.Message):
 
     await message.answer(text, parse_mode="HTML")
 
+@dp.message(Command("addtrigger"))
+async def cmd_add_trigger(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]:
+        return
+
+    # Формат: /addtrigger триггер | ответ
+    raw_text = message.text.replace("/addtrigger", "").strip()
+    if "|" not in raw_text:
+        await message.answer("⚠️ Использование: <code>/addtrigger ключевое слово | ответ картера</code>", parse_mode="HTML")
+        return
+
+    phrase, reply = map(str.strip, raw_text.split("|", 1))
+    phrase_clean = phrase.lower()
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO triggers (phrase, reply_text) 
+            VALUES ($1, $2) 
+            ON CONFLICT (phrase) DO UPDATE SET reply_text = EXCLUDED.reply_text
+            """,
+            phrase_clean, reply
+        )
+
+    await message.answer(f"✅ Триггер создан!\n<b>Ключ:</b> <code>{phrase_clean}</code>\n<b>Ответ:</b> {reply}", parse_mode="HTML")
+
+@dp.message(Command("deltrigger"))
+async def cmd_del_trigger(message: types.Message):
+    if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]:
+        return
+
+    phrase_clean = message.text.replace("/deltrigger", "").strip().lower()
+    if not phrase_clean:
+        await message.answer("⚠️ Использование: <code>/deltrigger ключевое слово</code>", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        res = await conn.execute("DELETE FROM triggers WHERE phrase = $1", phrase_clean)
+
+    if res == "DELETE 1":
+        await message.answer(f"🗑 Триггер <code>{phrase_clean}</code> успешно удален!", parse_mode="HTML")
+    else:
+        await message.answer("❌ Нету такого триггера.")
+
+@dp.message(Command("triggers"))
+async def cmd_list_triggers(message: types.Message):
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT phrase, reply_text FROM triggers ORDER BY id ASC")
+
+    if not rows:
+        await message.answer("Список триггеров пока пуст.")
+        return
+
+    text = "🗣 <b>Активные триггеры чата:</b>\n\n"
+    for r in rows:
+        text += f"• <code>{r['phrase']}</code> ➔ <i>{r['reply_text']}</i>\n"
+
+    await message.answer(text, parse_mode="HTML")
+
 @dp.message(Command("reset"))
 async def cmd_reset(message: types.Message):
     if (message.from_user.username or "").lower() not in [a.lower() for a in ADMIN_USERNAMES]:
@@ -1369,14 +1434,22 @@ async def cb_use_item(callback: types.CallbackQuery):
 
 @dp.message(F.text & ~F.text.startswith('/'))
 async def track_messages(message: types.Message):
-    # Работает только если у юзера уже есть профиль в базе
     user_id = message.from_user.id
+    msg_text = message.text.lower()
+
     async with db_pool.acquire() as conn:
-        # Пытаемся обновить, игнорируем ошибки, чтобы не крашить бота при спаме
+        # 1. Учет счетчика сообщений юзера
         try:
             await conn.execute("UPDATE users SET msg_count = COALESCE(msg_count, 0) + 1 WHERE user_id = $1", user_id)
-        except:
+        except Exception:
             pass
+
+        # 2. Проверка триггеров в БД
+        triggers = await conn.fetch("SELECT phrase, reply_text FROM triggers")
+        for t in triggers:
+            if t['phrase'] in msg_text:
+                await message.reply(t['reply_text'], parse_mode="HTML")
+                break # Отвечаем на первый найденный триггер
 
 # --- СЕРВЕР ---
 async def health_check(request):
