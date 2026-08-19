@@ -673,6 +673,7 @@ async def cb_fight(callback: types.CallbackQuery):
     
     log_msg = ""
     attacker['block'] = False 
+    turn_gif = None # <--- Переменная для хранения гифки на этот ход
     
     # 1. ПРОВЕРКА НА ОГЛУШЕНИЕ (Кнаклбластер V2)
     if attacker['stun']:
@@ -681,39 +682,36 @@ async def cb_fight(callback: types.CallbackQuery):
     else:
     # 2. ОБРАБОТКА ДЕЙСТВИЙ
         if action == "atk":
-            # --- 🛡 БОЖЕСТВЕННАЯ ЗАЩИТА (АДМИН) ---
             if defender['type'] == 'god':
                 attacker['hp'] -= 9999
-                log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> мгновенно расщеплен на атомы (-9999 HP)."
+                log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> расщеплен на атомы (-9999 HP)."
             else:
-                # --- ОБЫЧНАЯ АТАКА (для простых смертных) ---
                 dmg = max(0, attacker['atk'] + random.randint(-2, 3))
                 
-                # Пассивная ярость V2
                 if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 2):
                     dmg += 10
                     log_msg = f"💢 V2 В ЯРОСТИ! "
                 
-                # Проверка на промах Миноса (20%) или ослепление от Санса (25%)
                 miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
                 if attacker['blind']: miss_chance += 0.25
                 
                 if random.random() < miss_chance:
                     dmg = 0
                     log_msg = f"💨 {attacker['name']} промахивается по противнику!"
-                # Пассивка Санса (45%) или активка Нико (60%)
                 elif (defender['type'] == 'karma' and random.random() < 0.45) or (defender['niko_dodge'] and random.random() < 0.60):
-                    defender['niko_dodge'] = False # Сбрасываем бафф Нико
+                    defender['niko_dodge'] = False 
                     dmg = 0
                     log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
-                # Активка V1 (Парирование 50%)
+                
+                # --- ЛОГИКА ПАРИРОВАНИЯ И ГИФКИ V1 ---
                 elif defender['parry']:
-                    defender['parry'] = False # Срабатывает только на 1 удар
+                    defender['parry'] = False 
                     if random.random() < 0.5:
-                        reflected_dmg = dmg # Запоминаем летящий урон
-                        attacker['hp'] -= reflected_dmg # Возвращаем его атакующему
-                        dmg = 0 # V1 урон не получает
-                        log_msg = f"🪙 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно в {attacker['name']}!"
+                        reflected_dmg = dmg 
+                        attacker['hp'] -= reflected_dmg 
+                        dmg = 0 
+                        log_msg = f"🪙 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно!"
+                        turn_gif = SKILL_GIFS.get("vampire") # Гифка парирования вылетает ТОЛЬКО сейчас!
                 
                 if dmg > 0:
                     if defender['block']:
@@ -723,13 +721,11 @@ async def cb_fight(callback: types.CallbackQuery):
                     defender['hp'] -= dmg
                     log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
                     
-                    # Карма Санса
                     if attacker['type'] == 'karma':
                         karma_dmg = max(1, int(defender['max_hp'] * random.uniform(0.01, 0.05)))
                         defender['hp'] -= karma_dmg
                         log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
                     
-                    # Вампиризм V1
                     if attacker['type'] == 'vampire':
                         heal = max(1, int(dmg * 0.2))
                         attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
@@ -746,44 +742,40 @@ async def cb_fight(callback: types.CallbackQuery):
             
             r_type = attacker['type'] 
             
+            # --- ПРИВЯЗЫВАЕМ ГИФКИ КО ВСЕМ НАВЫКАМ, КРОМЕ V1 ---
+            if r_type != "vampire":
+                turn_gif = SKILL_GIFS.get(r_type)
+            
             if r_type == "god": 
                 attacker['cd'] = 1
                 dmg = int(defender['max_hp'] * 0.99)
                 defender['hp'] -= dmg
-                
-                phrases = [
-                    f"🤧 <b>{attacker['name']}</b> просто чихнул в сторону <b>{defender['name']}</b>, и того стерло в пыль на {dmg} урона!",
-                    f"🧠 <b>{attacker['name']}</b> случайно подумал о <b>{defender['name']}</b>, и его клетки начали распадаться на атомы (-{dmg} HP).",
-                    f"💅 <b>{attacker['name']}</b> лениво щелкнул пальцами. Половина чата выжила, а <b>{defender['name']}</b> потерял {dmg} HP.",
-                    f"🔨 <b>{attacker['name']}</b> прописал бан-хаммером по лицу. <b>{defender['name']}</b> чудом выжил (-{dmg} HP)."
-                ]
-                log_msg = random.choice(phrases)
-                
-            elif r_type == "berserk": # Минос
+                log_msg = f"🤧 <b>{attacker['name']}</b> стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
+            elif r_type == "berserk":
                 attacker['cd'] = 3
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
                 else:
                     defender['hp'] -= 50
                     log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 50 урона!"
-            elif r_type == "enrage": # V2
+            elif r_type == "enrage": 
                 attacker['cd'] = 3
                 defender['stun'] = True
-                defender['hp'] -= 15 # Кнаклбластер теперь наносит 15 гарантированного урона!
-                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 15 урона! {defender['name']} оглушен на следующий ход!"
-            elif r_type == "vampire": # V1
+                defender['hp'] -= 15 
+                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 15 урона! {defender['name']} оглушен!"
+            elif r_type == "vampire": 
                 attacker['cd'] = 3
                 attacker['parry'] = True
                 log_msg = f"🪙 {attacker['name']} готовится парировать следующую атаку!"
-            elif r_type == "karma": # Санс
+            elif r_type == "karma": 
                 attacker['cd'] = 3
                 defender['blind'] = True
-                log_msg = f"🦴 {attacker['name']} высрал несмешной каламбур. Точность {defender['name']} снижена!"
-            elif r_type == "light": # Нико
+                log_msg = f"🦴 {attacker['name']} снижает точность {defender['name']}!"
+            elif r_type == "light": 
                 attacker['cd'] = 1
                 attacker['niko_dodge'] = True
-                log_msg = f"💡 {attacker['name']} кричит «Я не кот!» и готовится увернуться."
-            elif r_type == "souls": # Рыцарь (Временно Хил)
+                log_msg = f"💡 {attacker['name']} готовится увернуться."
+            elif r_type == "souls": 
                 attacker['cd'] = 2
                 heal = int(attacker['max_hp'] * 0.25)
                 attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
@@ -870,17 +862,32 @@ async def cb_fight(callback: types.CallbackQuery):
     text = render_duel_text(duel_id)
     kb = get_duel_keyboard(duel_id)
     
-    if duel['turn_count'] % 2 != 0:
-        try:
-            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        except:
-            pass
+# Если на этом ходу сработала гифка - кидаем медиа-сообщение
+    if turn_gif and not turn_gif.startswith("тут_"):
+        try: await callback.message.delete()
+        except: pass
+        
+        # Текст боя становится подписью (caption) к гифке, а кнопки крепятся снизу
+        await callback.message.answer_animation(
+            animation=turn_gif, 
+            caption=text, 
+            reply_markup=kb, 
+            parse_mode="HTML"
+        )
     else:
-        try:
-            await callback.message.delete()
-        except:
-            pass
-        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        # Обычный текстовый ход
+        if duel['turn_count'] % 2 != 0:
+            try: 
+                await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            except Exception: 
+                # Сработает, если на прошлом ходу была гифка, и мы пытаемся edit_text на медиа-файле
+                try: await callback.message.delete()
+                except: pass
+                await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        else:
+            try: await callback.message.delete()
+            except: pass
+            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
         
     await callback.answer()
     
@@ -981,13 +988,6 @@ async def cb_use_item(callback: types.CallbackQuery):
         await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
         
     await callback.answer("Предмет использован!")
-
-@dp.message(F.animation)
-async def catch_gif_id(message: types.Message):
-    # Работает только для тебя (id из твоего админ-блока)
-    if message.from_user.id == 7857165309: 
-        file_id = message.animation.file_id
-        await message.answer(f"Твой file_id:\n<code>{file_id}</code>", parse_mode="HTML")
 
 # --- СЕРВЕР ---
 async def health_check(request):
