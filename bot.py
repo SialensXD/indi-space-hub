@@ -393,6 +393,39 @@ async def cmd_profile(message: types.Message):
     )
     
     await message.answer(f"👤 <b>Профиль {message.from_user.first_name}</b>\n\n{status}", parse_mode="HTML")
+    
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+
+    # Авто-регистрация в базе
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (user_id, username, credits, xp, role_changes) 
+            VALUES ($1, $2, 100, 0, 0) 
+            ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username
+            """,
+            user_id, username
+        )
+
+    if message.chat.type == "private":
+        text = (
+            f"👋 <b>Здрасьте, {message.from_user.first_name}!</b>\n\n"
+            f"Я Картер, бот-ассистент. Вот с чего тебе стоит начать:\n\n"
+            f"🎭 <b>/role</b> — выбрать персонажа для боев\n"
+            f"🎁 <b>/daily</b> — забрать ежедневную награду\n"
+            f"🏪 <b>/shop</b> — заглянуть в магазин товаров и титулов, там обнова каждые 4 часа\n"
+            f"👤 <b>/profile</b> — посмотреть свою статистику\n"
+            f"📊 <b>/top</b> — глянуть лидеров чата по разным штукам\n\n"
+            f"А в чате ответь командой <code>/duel</code> на сообщение соперника, чтобы вызвать его на бой"
+        )
+    else:
+        text = f" Приветствую, {message.from_user.first_name}! Картер в строю. Если нужна помощь, напиши мне в ЛС команду <code>/start</code>."
+
+    await message.answer(text, parse_mode="HTML")
+    
 @dp.message(Command("daily"))
 async def cmd_daily(message: types.Message):
     user_id = message.from_user.id
@@ -860,6 +893,31 @@ async def render_top(event, tab, is_edit=False):
 async def cmd_top(message: types.Message):
     # По умолчанию открываем топ по опыту
     await render_top(message, "xp", is_edit=False)
+
+@dp.message(F.new_chat_members)
+async def welcome_new_members(message: types.Message):
+    for member in message.new_chat_members:
+        if member.is_bot:
+            continue
+
+        # Вносим новичка в БД
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO users (user_id, username, credits, xp, role_changes) 
+                VALUES ($1, $2, 100, 0, 0) 
+                ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username
+                """,
+                member.id, member.username or ""
+            )
+
+        text = (
+            f"🙌 <b>Велком, {member.first_name}!</b>\n\n"
+            f"Я Картер (Мейби ты уже меня знаешь). *тут вся инфа и поздравления, потом вставлю*\n\n"
+            f"Для начала тебе начислен стартовый баланс <b>100 💰</b>. Веселись! 😉\n"
+            
+        )
+        await message.answer(text, parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("top_"))
 async def cb_top_tab(callback: types.CallbackQuery):
