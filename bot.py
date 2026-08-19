@@ -1032,7 +1032,7 @@ async def cmd_slots(message: types.Message):
     await asyncio.sleep(1.5)
 
     # 2. Логика генерации комбинации
-    roll_type = random.choices(["3inRow", "2inRow", "0inRow"], weights=[10, 35, 55])[0]
+    roll_type = random.choices(["3inRow", "2inRow", "0inRow"], weights=[7, 23, 70])[0]
 
     symbols_list = list(SLOT_SYMBOLS.keys())
     weights_list = [SLOT_SYMBOLS[s]["weight"] for s in symbols_list]
@@ -1066,7 +1066,7 @@ async def cmd_slots(message: types.Message):
     elif multiplier == 1:
         res_text = f"♻️ <b>Две одинаковые!</b> Возврат ставки: <b>+{payout} 💰</b>"
     else:
-        res_text = f"💀 <b>Увы, мимо!</b> Потеряно: <b>-{bet} 💰</b>"
+        res_text = f"💀 <b>ХАХА, МИМО!</b> Потеряно: <b>-{bet} 💰</b>"
 
     final_text = (
         f"🎰 <b>СЛОТЫ</b> | Игрок: {message.from_user.first_name}\n\n"
@@ -1159,18 +1159,31 @@ async def cb_dice_accept(callback: types.CallbackQuery):
         await conn.execute("UPDATE users SET credits = credits - $1 WHERE user_id = $2", bet, p1_id)
         await conn.execute("UPDATE users SET credits = credits - $1 WHERE user_id = $2", bet, p2_id)
 
-    # Бросаем кубы
-    r1 = random.randint(1, 6)
-    r2 = random.randint(1, 6)
+    # Удаляем сообщение с кнопкой, чтобы чат не засорялся
+    await callback.message.delete()
 
     p1_user = await get_user(p1_id)
     p2_user = await get_user(p2_id)
     name1 = p1_user['username'] or "Игрок 1"
     name2 = p2_user['username'] or "Игрок 2"
 
-    text = f"🎲 <b>РЕЗУЛЬТАТЫ БРОСКА:</b>\n\n"
-    text += f"👤 {name1} бросил: <b>[{r1}]</b>\n"
-    text += f"👤 {name2} бросил: <b>[{r2}]</b>\n\n"
+    # --- КИДАЕМ АНИМИРОВАННЫЕ КУБИКИ TELEGRAM ---
+    
+    await callback.message.answer(f"👤 <b>{name1}</b> бросает кубик...", parse_mode="HTML")
+    dice1 = await callback.message.answer_dice(emoji="🎲")
+    await asyncio.sleep(3.5) # Ждем, пока проиграется анимация
+
+    await callback.message.answer(f"👤 <b>{name2}</b> бросает кубик...", parse_mode="HTML")
+    dice2 = await callback.message.answer_dice(emoji="🎲")
+    await asyncio.sleep(3.5) # Ждем, пока проиграется анимация
+
+    # Telegram сам генерирует результат внутри объекта dice
+    r1 = dice1.dice.value
+    r2 = dice2.dice.value
+
+    # --- ПОДВОДИМ ИТОГИ ---
+    
+    text = f"📊 <b>ИТОГИ ДУЭЛИ:</b>\n\n"
 
     async with db_pool.acquire() as conn:
         if r1 > r2:
@@ -1186,7 +1199,9 @@ async def cb_dice_accept(callback: types.CallbackQuery):
             await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", bet, p1_id)
             await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", bet, p2_id)
             text += f"🤝 <b>Ничья!</b> Ставки возвращены игрокам."
-            await callback.message.edit_text(text, parse_mode="HTML")
+
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
 
 @dp.message(F.new_chat_members)
 async def welcome_new_members(message: types.Message):
