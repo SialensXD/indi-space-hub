@@ -280,7 +280,9 @@ async def setup_bot_commands(bot: Bot):
         BotCommand(command="profile", description="👤 Профиль, статы и рюкзак"),
         BotCommand(command="daily", description="🎁 Забрать ежедневную награду"),
         BotCommand(command="shop", description="🏪 Магазин предметов и титулов"),
-        BotCommand(command="duel", description="⚔️ Вызвать игрока (ответом на сообщение)"),
+        BotCommand(command="slots", description="🎰 Казино (слоты)"),
+        BotCommand(command="dice", description="🎲 Кости (пвп)"),
+        BotCommand(command="duel", description="⚔️ Вызвать на дуэль (ответь на сообщение)"),
         BotCommand(command="top", description="📊 Топ игроков чата"),
         BotCommand(command="title", description="👑 Управление титулами"),
     ]
@@ -981,6 +983,210 @@ async def render_top(event, tab, is_edit=False):
 async def cmd_top(message: types.Message):
     # По умолчанию открываем топ по опыту
     await render_top(message, "xp", is_edit=False)
+
+# --- КАЗИНО И КОСТИ ---
+
+SLOT_SYMBOLS = {
+    "7️⃣": {"mult": 50, "weight": 2},
+    "💎": {"mult": 15, "weight": 10},
+    "💰": {"mult": 7,  "weight": 18},
+    "🍒": {"mult": 4,  "weight": 30},
+    "🍋": {"mult": 2,  "weight": 40}
+}
+
+@dp.message(Command("slots", "casino"))
+async def cmd_slots(message: types.Message):
+    user_id = message.from_user.id
+    args = message.text.split()[1:]
+
+    if not args:
+        await message.answer("🎰 Использование: <code>/slots [ставка]</code> или <code>/slots вабанк</code>", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT credits FROM users WHERE user_id = $1", user_id)
+        if not user or user['credits'] <= 0:
+            await message.answer("❌ У тебя нет кредитов для игры!")
+            return
+
+        # Обработка ставки и Вабанка
+        if args[0].lower() in ["вабанк", "vabank", "allin", "все"]:
+            bet = user['credits']
+        else:
+            try:
+                bet = int(args[0])
+                if bet <= 0: raise ValueError
+            except ValueError:
+                await message.answer("❌ Укажи корректную сумму ставки!")
+                return
+
+        if bet > user['credits']:
+            await message.answer(f"❌ Не хватает кредитов! Твой баланс: {user['credits']} 💰")
+            return
+
+        # Списываем ставку перед круткой
+        await conn.execute("UPDATE users SET credits = credits - $1 WHERE user_id = $2", bet, user_id)
+
+    # 1. Отправляем анимацию ожидания
+    anim_msg = await message.answer("🎰 <b>Крутим барабаны...</b>\n\n[ ⏳ | ⏳ | ⏳ ]", parse_mode="HTML")
+    await asyncio.sleep(1.5)
+
+    # 2. Логика генерации комбинации
+    roll_type = random.choices(["3inRow", "2inRow", "0inRow"], weights=[10, 35, 55])[0]
+
+    symbols_list = list(SLOT_SYMBOLS.keys())
+    weights_list = [SLOT_SYMBOLS[s]["weight"] for s in symbols_list]
+
+    if roll_type == "3inRow":
+        chosen_symbol = random.choices(symbols_list, weights=weights_list)[0]
+        reels = [chosen_symbol, chosen_symbol, chosen_symbol]
+        multiplier = SLOT_SYMBOLS[chosen_symbol]["mult"]
+    elif roll_type == "2inRow":
+        pair_symbol = random.choice(symbols_list)
+        other_symbol = random.choice([s for s in symbols_list if s != pair_symbol])
+        reels = [pair_symbol, pair_symbol, other_symbol]
+        random.shuffle(reels)
+        multiplier = 1  # Возврат ставки
+    else:
+        reels = random.sample(symbols_list, 3) # Все 3 разные
+        multiplier = 0
+
+    payout = int(bet * multiplier)
+
+    # 3. Начисление выигрыша и формирование результата
+    async with db_pool.acquire() as conn:
+        if payout > 0:
+            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", payout, user_id)
+        new_balance = await conn.fetchval("SELECT credits FROM users WHERE user_id = $1", user_id)
+
+    reels_str = f"[ {reels[0]} | {reels[1]} | {reels[2]} ]"
+
+    if multiplier > 1:
+        res_text = f"🎉 <b>ЙООО, ДЖЕКПОТТТТ</b> Три в ряд!\nВыигрыш: <b>+{payout} 💰</b> (x{multiplier})"
+    elif multiplier == 1:
+        res_text = f"♻️ <b>Две одинаковые!</b> Возврат ставки: <b>+{payout} 💰</b>"
+    else:
+        res_text = f"💀 <b>Увы, мимо!</b> Потеряно: <b>-{bet} 💰</b>"
+
+    final_text = (
+        f"🎰 <b>СЛОТЫ</b> | Игрок: {message.from_user.first_name}\n\n"
+        f"<b>{reels_str}</b>\n\n"
+        f"{res_text}\n"
+        f"💳 Баланс: <b>{new_balance} 💰</b>"
+    )
+
+    await anim_msg.edit_text(final_text, parse_mode="HTML")
+
+
+# --- ПВП КУБИКИ (PVP DICE) ---
+
+@dp.message(Command("dice"))
+async def cmd_dice(message: types.Message):
+    user_id = message.from_user.id
+    
+    if not message.reply_to_message or message.reply_to_message.from_user.is_bot:
+        await message.answer("⚠️ Чтобы сыграть в кубики, ответь командой <code>/dice [ставка|вабанк]</code> на сообщение соперника!", parse_mode="HTML")
+        return
+
+    target = message.reply_to_message.from_user
+    if target.id == user_id:
+        await message.answer("Нельзя играть в кубики с самим собой!")
+        return
+    args = message.text.split()[1:]
+    if not args:
+        await message.answer("⚠️ Укажи сумму ставки или <code>вабанк</code>!", parse_mode="HTML")
+        return
+
+    async with db_pool.acquire() as conn:
+        p1 = await conn.fetchrow("SELECT credits FROM users WHERE user_id = $1", user_id)
+        p2 = await conn.fetchrow("SELECT credits FROM users WHERE user_id = $1", target.id)
+
+        if not p1 or not p2:
+            await message.answer("❌ Один из участников не найден в бд!")
+            return
+
+        # Расчет ставки для ПВП
+        if args[0].lower() in ["вабанк", "vabank", "allin", "все"]:
+            bet = min(p1['credits'], p2['credits']) # Вабанк ограничем меньшим балансом
+        else:
+            try:
+                bet = int(args[0])
+                if bet <= 0: raise ValueError
+            except ValueError:
+                await message.answer("❌ Некорректная ставка!")
+                return
+
+        if p1['credits'] < bet:
+            await message.answer("❌ У тебя недостаточно средств для такой ставки!")
+            return
+        if p2['credits'] < bet:
+            await message.answer(f"❌ У @{target.username or target.first_name} недостаточно средств!")
+            return
+
+    # Создаем кнопку вызова
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"🎲 Принять дуэль ({bet} 💰)", callback_data=f"dice_accept_{user_id}_{target.id}_{bet}")
+    builder.button(text="🤡 Струсить", callback_data=f"duel_decline_{target.id}")
+    builder.adjust(1)
+
+    await message.answer(
+        f"🎲 <b>БРОСОК КОСТЕЙ!</b>\n\n"
+        f"{message.from_user.first_name} вызывает <b>{target.first_name}</b> на дуэль на кубиках!\n"
+        f"💰 Ставка: <b>{bet} 💰</b> с каждого.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("dice_accept_"))
+async def cb_dice_accept(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    p1_id, p2_id, bet = int(parts[2]), int(parts[3]), int(parts[4])
+
+    if callback.from_user.id != p2_id:
+        await callback.answer("Это вызов не для тебя!", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        # Повторная проверка балансов
+        c1 = await conn.fetchval("SELECT credits FROM users WHERE user_id = $1", p1_id)
+        c2 = await conn.fetchval("SELECT credits FROM users WHERE user_id = $1", p2_id)
+
+        if c1 < bet or c2 < bet:
+            await callback.message.edit_text("❌ У одного из игроков изменился баланс. Игра отменена.")
+            return
+
+        # Списываем банк
+        await conn.execute("UPDATE users SET credits = credits - $1 WHERE user_id = $2", bet, p1_id)
+        await conn.execute("UPDATE users SET credits = credits - $1 WHERE user_id = $2", bet, p2_id)
+
+    # Бросаем кубы
+    r1 = random.randint(1, 6)
+    r2 = random.randint(1, 6)
+
+    p1_user = await get_user(p1_id)
+    p2_user = await get_user(p2_id)
+    name1 = p1_user['username'] or "Игрок 1"
+    name2 = p2_user['username'] or "Игрок 2"
+
+    text = f"🎲 <b>РЕЗУЛЬТАТЫ БРОСКА:</b>\n\n"
+    text += f"👤 {name1} бросил: <b>[{r1}]</b>\n"
+    text += f"👤 {name2} бросил: <b>[{r2}]</b>\n\n"
+
+    async with db_pool.acquire() as conn:
+        if r1 > r2:
+            win_pot = bet * 2
+            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", win_pot, p1_id)
+            text += f"🏆 Победитель: <b>{name1}</b>! Забирает банк <b>+{win_pot} 💰</b>"
+        elif r2 > r1:
+            win_pot = bet * 2
+            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", win_pot, p2_id)
+            text += f"🏆 Победитель: <b>{name2}</b>! Забирает банк <b>+{win_pot} 💰</b>"
+        else:
+            # Ничья — возврат
+            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", bet, p1_id)
+            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", bet, p2_id)
+            text += f"🤝 <b>Ничья!</b> Ставки возвращены игрокам."
+            await callback.message.edit_text(text, parse_mode="HTML")
 
 @dp.message(F.new_chat_members)
 async def welcome_new_members(message: types.Message):
