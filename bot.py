@@ -537,18 +537,12 @@ async def log_mod_action(target_id: int, target_name: str, admin_name: str, acti
 async def get_target_and_args(message: types.Message):
     """
     Универсально достает target_id, target_name и оставшиеся аргументы.
-    Поддерживает как Reply на сообщение, так и выборку по @username из БД.
+    Исправлен порядок: сначала проверяется @username, а потом Reply.
     """
     args = message.text.split()[1:]
     
-    # 1. Если команда отправлена в ответ на сообщение
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-        name = f"@{target.username}" if target.username else target.first_name
-        return target.id, name, args
-
-    # 2. Если передан @username первой переменной
-    if args:
+    # 1. Если первым аргументом передан @username
+    if args and args[0].startswith("@"):
         possible_user = args[0]
         clean_username = possible_user.lstrip("@").lower()
         
@@ -557,11 +551,22 @@ async def get_target_and_args(message: types.Message):
                 "SELECT user_id, username FROM users WHERE LOWER(username) = $1",
                 clean_username
             )
+        
         if row:
             return row['user_id'], f"@{row['username']}", args[1:]
-        elif possible_user.startswith("@"):
-            await message.answer(f"❌ Пользователь {possible_user} не найден в базе данных.")
+        else:
+            await message.answer(
+                f"❌ Пользователь {possible_user} не найден в базе данных бота.\n"
+                f"<i>(Чтобы бот его «увидел», он должен написать хотя бы одно сообщение в чат)</i>",
+                parse_mode="HTML"
+            )
             return None, None, None
+
+    # 2. Если команда отправлена ответом на сообщение (Reply)
+    if message.reply_to_message:
+        target = message.reply_to_message.from_user
+        name = f"@{target.username}" if target.username else target.first_name
+        return target.id, name, args
 
     await message.answer("⚠️ Ответь на сообщение или укажи @username!")
     return None, None, None
