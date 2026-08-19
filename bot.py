@@ -1513,7 +1513,7 @@ async def cb_fight(callback: types.CallbackQuery):
                 if random.random() < miss_chance:
                     dmg = 0
                     log_msg = f"💨 {attacker['name']} промахивается по противнику!"
-                elif (defender['type'] == 'karma' and random.random() < 0.97) or (defender['niko_dodge'] and random.random() < 0.60):
+                elif (defender['type'] == 'karma' and random.random() < 0.95) or (defender['niko_dodge'] and random.random() < 0.60):
                     defender['niko_dodge'] = False 
                     dmg = 0
                     log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
@@ -1538,7 +1538,7 @@ async def cb_fight(callback: types.CallbackQuery):
                     
                     if attacker['type'] == 'karma':
                         
-                        karma_dmg = max(1, int(defender['hp'] * 0.1))
+                        karma_dmg = max(1, int(defender['max_hp'] * 0.07))
                         defender['hp'] -= karma_dmg
                         log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
                     
@@ -1562,7 +1562,7 @@ async def cb_fight(callback: types.CallbackQuery):
             if r_type != "vampire":
                 turn_gif = SKILL_GIFS.get(r_type)
             
-            is_karma_dodge = (defender['type'] == 'karma' and random.random() < 0.97)
+            is_karma_dodge = (defender['type'] == 'karma' and random.random() < 0.95)
 
             if r_type == "god": 
                 attacker['cd'] = 0
