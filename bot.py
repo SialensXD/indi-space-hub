@@ -1808,7 +1808,7 @@ async def track_messages(message: types.Message):
 
     # --- СИСТЕМА СУНДУКОВ ---
     # Сундуки падают только в группах с шансом, например, 3% на каждое сообщение
-    if message.chat.type in ['group', 'supergroup'] and random.random() < 0.03:
+    if message.chat.type in ['group', 'supergroup'] and random.random() < 0.0025:
         chest_id = str(uuid.uuid4())[:8]
         active_chests.add(chest_id)
         
