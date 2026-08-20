@@ -1199,7 +1199,10 @@ async def on_startup(bot: Bot):
     await setup_bot_commands(bot) # Регистр меню команд
     url = webhook_url()
     if url:
-        await bot.set_webhook(url, drop_pending_updates=True)
+        webhook_options = {"drop_pending_updates": True}
+        if WEBHOOK_SECRET:
+            webhook_options["secret_token"] = WEBHOOK_SECRET
+        await bot.set_webhook(url, **webhook_options)
 
 async def on_shutdown(bot: Bot):
     if db_pool is not None:
