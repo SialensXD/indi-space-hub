@@ -6,7 +6,22 @@ const screens = {
   info: document.querySelector("#info-screen"),
 };
 const applicationKey = "indie-site-application-token";
+const apiUrl = (document.querySelector('meta[name="site-api-url"]')?.content || "").replace(/\/$/, "");
 let pollTimer;
+
+function apiPath(path) {
+  return `${apiUrl}${path}`;
+}
+
+async function readJson(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("API сайта не подключен к этой странице.");
+  }
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Сервер не принял запрос.");
+  return data;
+}
 
 function showScreen(name) {
   Object.values(screens).forEach((screen) => screen.classList.add("is-hidden"));
@@ -21,13 +36,13 @@ function showFormMessage(message, isError = false) {
 
 async function checkStatus(token) {
   try {
-    const response = await fetch(`/api/applications/${encodeURIComponent(token)}`);
-    if (!response.ok) {
+    const response = await fetch(apiPath(`/api/applications/${encodeURIComponent(token)}`));
+    if (response.status === 404) {
       localStorage.removeItem(applicationKey);
       showScreen("application");
       return;
     }
-    const application = await response.json();
+    const application = await readJson(response);
     if (application.status === "approved") {
       clearInterval(pollTimer);
       showScreen("info");
@@ -46,13 +61,13 @@ async function checkStatus(token) {
 async function loadStats() {
   const table = document.querySelector("#top-table");
   try {
-    const response = await fetch("/api/stats");
-    const data = await response.json();
+    const response = await fetch(apiPath("/api/stats"));
+    const data = await readJson(response);
     table.innerHTML = data.top.length
       ? data.top.map((player, index) => `<tr><td>${index + 1}</td><td>@${player.username}</td><td>${player.messages}</td><td>${player.xp}</td><td>${player.wins}</td></tr>`).join("")
       : '<tr><td colspan="5">Пока нет статистики.</td></tr>';
   } catch (error) {
-    table.innerHTML = '<tr><td colspan="5">Статистика временно недоступна.</td></tr>';
+    table.innerHTML = `<tr><td colspan="5">${error.message}</td></tr>`;
   }
 }
 
@@ -65,18 +80,22 @@ document.querySelector("#application-form").addEventListener("submit", async (ev
   button.disabled = true;
   showFormMessage("Отправляем заявку...");
   try {
-    const response = await fetch("/api/apply", {
+    const response = await fetch(apiPath("/api/apply"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username }),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Не удалось отправить заявку");
+    const data = await readJson(response);
     localStorage.setItem(applicationKey, data.token);
     checkStatus(data.token);
     pollTimer = setInterval(() => checkStatus(data.token), 5000);
   } catch (error) {
-    showFormMessage(error.message, true);
+    showFormMessage(
+      error.message === "Failed to fetch"
+        ? "Не удалось связаться с сервером. Проверь URL backend и CORS."
+        : error.message,
+      true,
+    );
     button.disabled = false;
   }
 });

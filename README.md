@@ -43,6 +43,8 @@
 
 Персонажи и чейнджлог редактируются вручную в `index.html`. Ссылка на чат также находится там. Username сам по себе не доказывает личность пользователя, поэтому для строгой идентификации позже можно добавить Telegram Login Widget или deep link `/start`.
 
+Если frontend опубликован на GitHub Pages, укажи публичный адрес Render-сервиса с ботом в `meta[name="site-api-url"]` внутри `index.html`. Например: `https://your-bot.onrender.com`. В Render добавь переменную `SITE_ORIGIN=https://sialensxd.github.io`. Без этого GitHub Pages возвращает свою HTML-страницу вместо JSON API.
+
 Укажите одинаковое значение `WEBHOOK_SECRET` только в Render. Оно используется для отклонения webhook-запросов, не содержащих секретный заголовок Telegram.
 
 ## Существующая база данных Supabase

@@ -17,6 +17,7 @@ from config import (
     PORT,
     WEBHOOK_SECRET,
     WEBHOOK_PATH,
+    SITE_ORIGIN,
     webhook_url,
 )
 from domain import (
@@ -1361,6 +1362,21 @@ async def site_asset(request):
         raise web.HTTPNotFound()
     return web.FileResponse(APP_ROOT / filename)
 
+
+@web.middleware
+async def cors_middleware(request: web.Request, handler):
+    if request.path.startswith("/api/") and request.method == "OPTIONS":
+        response = web.Response(status=204)
+    else:
+        response = await handler(request)
+
+    if request.path.startswith("/api/"):
+        response.headers["Access-Control-Allow-Origin"] = SITE_ORIGIN
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Vary"] = "Origin"
+    return response
+
 async def on_startup(bot: Bot):
     await init_db()
     await refresh_shop_if_needed()
@@ -1382,7 +1398,7 @@ def main():
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     dp.message.middleware(AntiTheftMiddleware())
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_get('/', site_index)
     app.router.add_get('/health', health_check)
     app.router.add_get('/{filename:script\\.js|style\\.css}', site_asset)

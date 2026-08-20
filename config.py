@@ -14,6 +14,7 @@ if not DATABASE_URL:
 WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+SITE_ORIGIN = os.environ.get("SITE_ORIGIN", "https://sialensxd.github.io")
 PORT = int(os.environ.get("PORT", "10000"))
 
 ADMIN_USERNAMES = {
