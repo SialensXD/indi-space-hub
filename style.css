@@ -41,7 +41,7 @@ body::after {
   top: 22px;
   right: 30px;
   color: var(--red);
-  content: 'LAYER 07 // ACTIVE';
+  content: 'Сиаленс наблюдает за тобой (¬‿¬) ';
   font: 600 11px var(--mono);
   letter-spacing: 1px;
 }

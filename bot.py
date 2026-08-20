@@ -73,6 +73,7 @@ duel_invites = {}
 
 # --- МАГАЗИН ---
 shop_data = {"items": [], "titles": [], "last_update": datetime.now(timezone.utc)}
+shop_refresh_task = None
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message
@@ -225,7 +226,7 @@ async def init_db():
             db_pool = None
         raise RuntimeError("Database initialization failed") from e
 
-async def refresh_shop_if_needed():
+async def refresh_shop_if_needed(*, notify=True):
     global shop_data
     if not shop_data['items'] or (datetime.now(timezone.utc) - shop_data['last_update']) >= timedelta(hours=4):
         async with db_pool.acquire() as conn:
@@ -233,7 +234,7 @@ async def refresh_shop_if_needed():
             shop_data['titles'] = await conn.fetch("SELECT * FROM titles WHERE is_admin_only = FALSE ORDER BY RANDOM() LIMIT 4")
             
             # --- НОВЫЙ БЛОК: РАССЫЛКА ---
-            if shop_data['last_update'] != datetime.min.replace(tzinfo=timezone.utc): # Не спамим при самом первом запуске
+            if notify:
                 users_to_notify = await conn.fetch("SELECT user_id FROM users WHERE notifications_enabled = TRUE")
                 for u in users_to_notify:
                     try:
@@ -249,6 +250,12 @@ async def refresh_shop_if_needed():
 
         shop_data['last_update'] = datetime.now(timezone.utc)
         logging.info("🏪 Ассортимент магазина обновлен!")
+
+
+async def shop_refresh_loop():
+    while True:
+        await asyncio.sleep(timedelta(hours=4).total_seconds())
+        await refresh_shop_if_needed()
 
 async def get_roles():
     async with db_pool.acquire() as conn:
@@ -973,7 +980,11 @@ async def cb_fight(callback: types.CallbackQuery):
     else:
     # 2. ОБРАБОТКА ДЕЙСТВИЙ
         if action == "atk":
-            if defender['type'] == 'god':
+            if attacker['type'] == 'god':
+                dmg = attacker['atk']
+                defender['hp'] -= dmg
+                log_msg = f"⚡️ <b>{attacker['name']}</b> наносит {dmg} урона силой Создателя!"
+            elif defender['type'] == 'god':
                 attacker['hp'] -= 9999
                 log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> расщеплен на атомы (-9999 HP)."
             else:
@@ -1378,8 +1389,10 @@ async def cors_middleware(request: web.Request, handler):
     return response
 
 async def on_startup(bot: Bot):
+    global shop_refresh_task
     await init_db()
-    await refresh_shop_if_needed()
+    await refresh_shop_if_needed(notify=False)
+    shop_refresh_task = asyncio.create_task(shop_refresh_loop())
     await load_triggers_cache()
     await setup_bot_commands(bot) # Регистр меню команд
     url = webhook_url()
@@ -1390,6 +1403,14 @@ async def on_startup(bot: Bot):
         await bot.set_webhook(url, **webhook_options)
 
 async def on_shutdown(bot: Bot):
+    global shop_refresh_task
+    if shop_refresh_task is not None:
+        shop_refresh_task.cancel()
+        try:
+            await shop_refresh_task
+        except asyncio.CancelledError:
+            pass
+        shop_refresh_task = None
     if db_pool is not None:
         await db_pool.close()
     await bot.session.close()

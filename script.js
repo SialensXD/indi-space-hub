@@ -92,7 +92,7 @@ document.querySelector("#application-form").addEventListener("submit", async (ev
   } catch (error) {
     showFormMessage(
       error.message === "Failed to fetch"
-        ? "Не удалось связаться с сервером. Проверь URL backend и CORS."
+        ? "Не удалось связаться с сервером. Проверь URL backend и CORS и попробуй снова!"
         : error.message,
       true,
     );
