@@ -261,6 +261,7 @@ async def get_user(user_id: int):
             """,
             user_id
         )
+ 
         
 async def save_user_role(user_id: int, username: str, role_id: int):
     async with db_pool.acquire() as conn:
