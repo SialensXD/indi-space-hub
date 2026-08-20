@@ -4,6 +4,8 @@ import sys
 import logging
 import asyncio
 import asyncpg
+import secrets
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 from config import (
@@ -44,6 +46,7 @@ dp = Dispatcher()
 db_pool = None
 
 START_TIME = datetime.now(timezone.utc)
+APP_ROOT = Path(__file__).resolve().parent
 
 import random
 
@@ -169,6 +172,14 @@ async def init_db():
                     reason TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                CREATE TABLE IF NOT EXISTS site_applications (
+                    token TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    user_id BIGINT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    decided_at TIMESTAMPTZ
+                );
             """)
             await conn.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
@@ -261,6 +272,103 @@ async def get_user(user_id: int):
             """,
             user_id
         )
+
+
+def normalize_username(value: str) -> str:
+    return value.strip().lstrip("@").lower()
+
+
+def application_keyboard(token: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Впустить", callback_data=f"site_approve_{token}")
+    builder.button(text="❌ Отклонить", callback_data=f"site_reject_{token}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+async def create_site_application(username: str):
+    clean_username = normalize_username(username)
+    token = secrets.token_urlsafe(12)
+    async with db_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            "SELECT user_id FROM users WHERE LOWER(username) = $1 LIMIT 1",
+            clean_username,
+        )
+        await conn.execute(
+            """
+            INSERT INTO site_applications (token, username, user_id)
+            VALUES ($1, $2, $3)
+            """,
+            token,
+            clean_username,
+            user_id,
+        )
+    return token, user_id
+
+
+async def site_application(request: web.Request):
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        return web.json_response({"error": "Некорректный JSON"}, status=400)
+
+    username = str(payload.get("username", ""))
+    clean_username = normalize_username(username)
+    if not re.fullmatch(r"[a-zA-Z0-9_]{5,32}", clean_username):
+        return web.json_response(
+            {"error": "Укажи корректный Telegram username без пробелов."},
+            status=400,
+        )
+
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            """
+            SELECT token, status FROM site_applications
+            WHERE username = $1 AND status = 'pending'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            clean_username,
+        )
+    if existing:
+        return web.json_response({"token": existing["token"], "status": existing["status"]})
+
+    token, user_id = await create_site_application(clean_username)
+    text = (
+        "🌐 <b>Новая заявка на сайт</b>\n\n"
+        f"Username: <b>@{clean_username}</b>\n"
+        f"ID в базе: <code>{user_id or 'не найден'}</code>\n\n"
+        "Решение откроет или закроет доступ к информационной части сайта."
+    )
+    await bot.send_message(ADMIN_USER_ID, text, reply_markup=application_keyboard(token), parse_mode="HTML")
+    return web.json_response({"token": token, "status": "pending"})
+
+
+async def site_application_status(request: web.Request):
+    token = request.match_info["token"]
+    async with db_pool.acquire() as conn:
+        application = await conn.fetchrow(
+            "SELECT username, status FROM site_applications WHERE token = $1",
+            token,
+        )
+    if not application:
+        return web.json_response({"error": "Заявка не найдена"}, status=404)
+    return web.json_response(dict(application))
+
+
+async def site_stats(request: web.Request):
+    async with db_pool.acquire() as conn:
+        top = await conn.fetch(
+            """
+            SELECT COALESCE(username, 'Аноним') AS username,
+                   COALESCE(msg_count, 0) AS messages,
+                   COALESCE(xp, 0) AS xp,
+                   COALESCE(wins, 0) AS wins
+            FROM users
+            ORDER BY msg_count DESC, xp DESC
+            LIMIT 10
+            """
+        )
+    return web.json_response({"top": [dict(row) for row in top]})
  
         
 async def save_user_role(user_id: int, username: str, role_id: int):
@@ -669,6 +777,56 @@ async def welcome_new_members(message: types.Message):
 async def cb_top_tab(callback: types.CallbackQuery):
     tab = callback.data.split("_")[1]
     await render_top(callback, tab, is_edit=True)
+
+
+async def decide_site_application(callback: types.CallbackQuery, status: str):
+    if callback.from_user.id != ADMIN_USER_ID:
+        await callback.answer("Эта кнопка только для владельца.", show_alert=True)
+        return
+
+    token = callback.data.rsplit("_", 1)[1]
+    async with db_pool.acquire() as conn:
+        application = await conn.fetchrow(
+            """
+            UPDATE site_applications
+            SET status = $1, decided_at = NOW()
+            WHERE token = $2 AND status = 'pending'
+            RETURNING username, user_id
+            """,
+            status,
+            token,
+        )
+
+    if not application:
+        await callback.answer("Заявка уже обработана или не найдена.", show_alert=True)
+        return
+
+    approved = status == "approved"
+    decision_text = "✅ ВПУЩЕН" if approved else "❌ ОТКЛОНЕН"
+    await callback.message.edit_text(
+        f"🌐 Заявка @{application['username']} — <b>{decision_text}</b>",
+        parse_mode="HTML",
+    )
+    if application["user_id"]:
+        try:
+            await bot.send_message(
+                application["user_id"],
+                "✅ Тебя впустили на информационную часть сайта!" if approved
+                else "❌ Заявку отклонили. Спасибо за интерес к чату.",
+            )
+        except Exception:
+            logging.info("Не удалось уведомить пользователя @%s", application["username"])
+    await callback.answer("Решение сохранено")
+
+
+@dp.callback_query(F.data.startswith("site_approve_"))
+async def cb_site_approve(callback: types.CallbackQuery):
+    await decide_site_application(callback, "approved")
+
+
+@dp.callback_query(F.data.startswith("site_reject_"))
+async def cb_site_reject(callback: types.CallbackQuery):
+    await decide_site_application(callback, "rejected")
 
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
@@ -1192,6 +1350,17 @@ async def cb_chest_claim(callback: types.CallbackQuery):
 async def health_check(request):
     return web.Response(text="Bot is alive!", status=200)
 
+
+async def site_index(request):
+    return web.FileResponse(APP_ROOT / "index.html")
+
+
+async def site_asset(request):
+    filename = request.match_info["filename"]
+    if filename not in {"script.js", "style.css"}:
+        raise web.HTTPNotFound()
+    return web.FileResponse(APP_ROOT / filename)
+
 async def on_startup(bot: Bot):
     await init_db()
     await refresh_shop_if_needed()
@@ -1214,7 +1383,12 @@ def main():
     dp.shutdown.register(on_shutdown)
     dp.message.middleware(AntiTheftMiddleware())
     app = web.Application()
-    app.router.add_get('/', health_check)
+    app.router.add_get('/', site_index)
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/{filename:script\\.js|style\\.css}', site_asset)
+    app.router.add_post('/api/apply', site_application)
+    app.router.add_get('/api/applications/{token}', site_application_status)
+    app.router.add_get('/api/stats', site_stats)
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
