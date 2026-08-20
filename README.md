@@ -1,10 +1,14 @@
-# Carter Telegram Bot
+# C.A.R.T.E.R. - Телеграм Бот
 
-Telegram bot running as an aiohttp web service on Render with PostgreSQL hosted by Supabase.
+Картер - это Телеграм-бот, работающий как веб-сервис aiohttp на Render с PostgreSQL, размещённой в Supabase.
 
-## Local setup
+Он создан и "Интегрирован" специально в Indie Space Чат.
 
-1. Create a virtual environment and install dependencies:
+Ниже настройка, если вы захотите написать своего бота на основе моего.
+
+## Локальная настройка
+
+1. Создайте виртуальное окружение и установите зависимости:
 
    ```powershell
    python -m venv .venv
@@ -12,46 +16,46 @@ Telegram bot running as an aiohttp web service on Render with PostgreSQL hosted 
    pip install -r requirements.txt
    ```
 
-2. Set the variables from `.env.example` in the shell or in Render. Do not commit real tokens or database credentials.
-3. Start the service:
+2. Укажите переменные из `.env.example` в оболочке или в Render. Не добавляйте настоящие токены и учётные данные базы данных в коммиты.
+3. Запустите сервис:
 
    ```powershell
    python bot.py
    ```
 
-## Render settings
+## Настройки Render
 
-- Runtime: Python
-- Build command: `pip install -r requirements.txt`
-- Start command: `python bot.py`
-- Health check path: `/`
-- Required variables: `BOT_TOKEN`, `DATABASE_URL`, `RENDER_EXTERNAL_URL`
-- Recommended variable: `WEBHOOK_SECRET`
+- Среда выполнения: Python
+- Команда сборки: `pip install -r requirements.txt`
+- Команда запуска: `python bot.py`
+- Путь проверки работоспособности: `/`
+- Обязательные переменные: `BOT_TOKEN`, `DATABASE_URL`, `RENDER_EXTERNAL_URL`
+- Рекомендуемая переменная: `WEBHOOK_SECRET`
 
-`DATABASE_URL` must be a PostgreSQL URL from Supabase. The application disables prepared-statement caching for compatibility with Supabase transaction poolers.
+`DATABASE_URL` должен содержать URL PostgreSQL из Supabase. Приложение отключает кэширование подготовленных операторов для совместимости с пулерами транзакций Supabase.
 
-Set the same `WEBHOOK_SECRET` only in Render. It is used to reject webhook requests that do not contain Telegram's secret header.
+Укажите одинаковое значение `WEBHOOK_SECRET` только в Render. Оно используется для отклонения webhook-запросов, не содержащих секретный заголовок Telegram.
 
-## Existing Supabase database
+## Существующая база данных Supabase
 
-The application does not delete users, inventory, titles, triggers, or logs. On startup it only creates missing tables and adds missing columns. It also does not insert seed roles/items/titles, so existing game data remains authoritative.
+Приложение не удаляет пользователей, инвентарь, титулы, триггеры или журналы. При запуске оно только создаёт отсутствующие таблицы и добавляет отсутствующие столбцы. Оно также не добавляет начальные роли, предметы и титулы, поэтому существующие игровые данные остаются основными.
 
-Before the first deploy:
+Перед первым развёртыванием:
 
-1. In Supabase, create a database backup or export the affected tables.
-2. Check that these tables exist: `users`, `roles`, `items`, `titles`, `inventory`, `user_titles`, `triggers`, `mod_logs`.
-3. Check that `users.user_id` is unique. The bot needs it for `ON CONFLICT (user_id)`.
-4. Check that `inventory` has a unique constraint on `(user_id, item_id)`. The shop needs it for `ON CONFLICT (user_id, item_id)`.
-5. Check that `user_titles` has a unique constraint on `(user_id, title_id)`.
-6. Confirm that your existing `roles.id`, `items.id`, and `titles.id` values match the role IDs and item/title references already used by the bot.
-7. Deploy the service. The first startup runs only additive schema changes. Watch Render logs for `Подключение к БД успешно`.
-8. Test `/start`, `/role`, `/profile`, `/shop`, `/daily`, `/status` in Telegram.
+1. В Supabase создайте резервную копию базы данных или экспортируйте затронутые таблицы.
+2. Убедитесь, что существуют следующие таблицы: `users`, `roles`, `items`, `titles`, `inventory`, `user_titles`, `triggers`, `mod_logs`.
+3. Убедитесь, что `users.user_id` уникален. Боту это необходимо для `ON CONFLICT (user_id)`.
+4. Убедитесь, что для `inventory` есть уникальное ограничение на `(user_id, item_id)`. Это необходимо магазину для `ON CONFLICT (user_id, item_id)`.
+5. Убедитесь, что для `user_titles` есть уникальное ограничение на `(user_id, title_id)`.
+6. Убедитесь, что существующие значения `roles.id`, `items.id` и `titles.id` соответствуют идентификаторам ролей и ссылкам на предметы и титулы, которые уже используются ботом.
+7. Разверните сервис. При первом запуске выполняются только аддитивные изменения схемы. Следите в логах Render за сообщением `Подключение к БД успешно`.
+8. Проверьте в Telegram команды `/start`, `/role`, `/profile`, `/shop`, `/daily`, `/status`.
 
-The destructive `/clear_db` command has been removed. There is no application command that clears the users table.
+Деструктивная команда `/clear_db` удалена. В приложении нет команды, которая очищает таблицу пользователей.
 
-## Project layout
+## Структура проекта
 
-- `bot.py`: aiogram handlers, application wiring, lifecycle, and database queries still being migrated.
-- `config.py`: environment-backed deployment configuration.
-- `domain.py`: pure progression and moderation helpers.
-- `game_data.py`: static character, skill, and slot balance data.
+- `bot.py`: обработчики aiogram, настройка приложения, жизненный цикл и запросы к базе данных, которые ещё находятся в процессе переноса.
+- `config.py`: конфигурация развёртывания на основе переменных окружения.
+- `domain.py`: чистые вспомогательные функции для прогрессии и модерации.
+- `game_data.py`: статические данные о персонажах, навыках и балансе слотов.
