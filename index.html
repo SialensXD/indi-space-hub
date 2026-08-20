@@ -3,18 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Indie Space — Интерактивный Хаб</title>
+  <title>Indie Space - закрытая территория</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<!DOCTYPE html>
-<html lang="ru">
-    <h1>Добро пожаловать в Инди-Флуд</h1>
-    <p>Выбери своего персонажа, находи секретки и участвуй в дуэлях!</p>
-    
-  <title>Indie Space — закрытая территория</title>
-
-<h2>Выбери своего персонажа</h2>
-<div class="roles-grid">
+<body>
   <main class="shell">
     <section id="welcome-screen" class="screen screen-welcome">
       <p class="eyebrow">INDIE SPACE / PRIVATE HUB</p>
@@ -65,15 +57,20 @@
       <section class="info-section">
         <div class="section-heading"><span>01</span><h3>Топ чата</h3></div>
         <p class="muted">Данные подтягиваются из статистики бота.</p>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>Игрок</th><th>Сообщения</th><th>XP</th><th>Победы</th></tr></thead><tbody id="top-table"><tr><td colspan="5">Загрузка статистики...</td></tr></tbody></table></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Игрок</th><th>Сообщения</th><th>XP</th><th>Победы</th></tr></thead>
+            <tbody id="top-table"><tr><td colspan="5">Загрузка статистики...</td></tr></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="info-section">
         <div class="section-heading"><span>02</span><h3>Боевые персонажи</h3></div>
         <div class="roles-grid">
-          <article class="role-card"><div class="role-icon">🗡</div><h4>Холлоу Кнайт</h4><p>Текст персонажа можно заменить здесь.</p></article>
-          <article class="role-card"><div class="role-icon">☀</div><h4>Нико</h4><p>Текст персонажа можно заменить здесь.</p></article>
-          <article class="role-card"><div class="role-icon">☠</div><h4>Санс</h4><p>Текст персонажа можно заменить здесь.</p></article>
+          <article class="role-card"><div class="role-icon">[1]</div><h4>Холлоу Кнайт</h4><p>Текст персонажа можно заменить здесь.</p></article>
+          <article class="role-card"><div class="role-icon">[2]</div><h4>Нико</h4><p>Текст персонажа можно заменить здесь.</p></article>
+          <article class="role-card"><div class="role-icon">[3]</div><h4>Санс</h4><p>Текст персонажа можно заменить здесь.</p></article>
         </div>
       </section>
 
@@ -83,3 +80,6 @@
       </section>
     </section>
   </main>
+  <script src="script.js"></script>
+</body>
+</html>
