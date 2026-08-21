@@ -40,12 +40,28 @@
 2. Сервис сохраняет заявку в `site_applications` и отправляет ее владельцу на `ADMIN_USER_ID` с кнопками `Впустить` и `Отклонить`.
 3. После решения сайт узнает статус по временному токену. При одобрении открывается ссылка на чат и информационная часть.
 4. Таблица топа загружается из `users` по `msg_count`, `xp` и `wins`.
+5. Чейнджлог загружается из таблицы `changelog_entries` в Supabase через `/api/changelog`.
 
 Персонажи и чейнджлог редактируются вручную в `index.html`. Ссылка на чат также находится там. Username сам по себе не доказывает личность пользователя, поэтому для строгой идентификации позже можно добавить Telegram Login Widget или deep link `/start`.
 
 Если frontend опубликован на GitHub Pages, укажи публичный адрес Render-сервиса с ботом в `meta[name="site-api-url"]` внутри `index.html`. Например: `https://your-bot.onrender.com`. В Render добавь переменную `SITE_ORIGIN=https://sialensxd.github.io`. Без этого GitHub Pages возвращает свою HTML-страницу вместо JSON API.
 
 Укажите одинаковое значение `WEBHOOK_SECRET` только в Render. Оно используется для отклонения webhook-запросов, не содержащих секретный заголовок Telegram.
+
+### Управление чейнджлогом
+
+При запуске бот автоматически создаёт таблицу `changelog_entries`, если её ещё нет. Записи можно добавлять и менять прямо в Supabase:
+
+```sql
+INSERT INTO changelog_entries (title, body, published_at)
+VALUES ('Обновление сайта', 'Добавили новый пункт в правила.', NOW());
+
+UPDATE changelog_entries
+SET is_visible = FALSE
+WHERE id = 1;
+```
+
+Поля `title` и `body` отображаются на сайте, `published_at` задаёт порядок публикаций, а `is_visible` скрывает запись без удаления. Сайт показывает до 50 последних видимых записей.
 
 ## Существующая база данных Supabase
 
@@ -54,7 +70,7 @@
 Перед первым развёртыванием:
 
 1. В Supabase создайте резервную копию базы данных или экспортируйте затронутые таблицы.
-2. Убедитесь, что существуют следующие таблицы: `users`, `roles`, `items`, `titles`, `inventory`, `user_titles`, `triggers`, `mod_logs`.
+2. Убедитесь, что существуют следующие таблицы: `users`, `roles`, `items`, `titles`, `inventory`, `user_titles`, `triggers`, `mod_logs`, `changelog_entries`.
 3. Убедитесь, что `users.user_id` уникален. Боту это необходимо для `ON CONFLICT (user_id)`.
 4. Убедитесь, что для `inventory` есть уникальное ограничение на `(user_id, item_id)`. Это необходимо магазину для `ON CONFLICT (user_id, item_id)`.
 5. Убедитесь, что для `user_titles` есть уникальное ограничение на `(user_id, title_id)`.

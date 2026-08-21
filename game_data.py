@@ -2,8 +2,8 @@
 
 CHARACTERS = {
     1: {"hp": 100, "max_hp": 100, "atk": 15, "type": "souls"},
-    2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light"},
-    3: {"hp": 1, "max_hp": 1, "atk": 0.1, "type": "karma"},
+    2: {"hp": 95, "max_hp": 95, "atk": 12, "type": "light", "revive_once": True},
+    3: {"hp": 1, "max_hp": 1, "atk": 0, "type": "karma"},
     4: {"hp": 100, "max_hp": 100, "atk": 15, "type": "vampire"},
     5: {"hp": 125, "max_hp": 125, "atk": 15, "type": "enrage"},
     6: {"hp": 140, "max_hp": 140, "atk": 20, "type": "berserk"},

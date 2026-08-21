@@ -57,7 +57,7 @@ import uuid
 
 active_chests = set() 
 
-# Кэш триггеров в ОЗУ
+#кэш триггеров в ОЗУ
 TRIGGERS_CACHE = {}
 
 async def load_triggers_cache():
@@ -71,7 +71,7 @@ async def load_triggers_cache():
 active_duels = {}
 duel_invites = {}
 
-# --- МАГАЗИН ---
+#МАГАЗИН
 shop_data = {"items": [], "titles": [], "last_update": datetime.now(timezone.utc)}
 shop_refresh_task = None
 
@@ -85,7 +85,6 @@ class AntiTheftMiddleware(BaseMiddleware):
         if isinstance(event, Message):
             chat = event.chat
             
-            # 1. Если это ЛС - пускаем
             if chat.type == 'private':
                 return await handler(event, data)
             
@@ -93,19 +92,18 @@ class AntiTheftMiddleware(BaseMiddleware):
             if chat.id in ALLOWED_GROUPS:
                 return await handler(event, data)
                 
-            # 3. Если группа чужая — караем
             try:
                 logging.warning(f"🚨 Опа, у нас тут попытка угона! Чат: {chat.title} ({chat.id})")
                 await event.answer("🧿Попытка угона? Я предусмотрел и такое. \nБот в чужих чатах не работает. \nС любовью, Ваш Сиаленс😘")
-                await event.bot.leave_chat(chat.id) # Бот сам выходит из группы
+                await event.bot.leave_chat(chat.id) #бот сам выходит из группы
             except Exception:
                 pass
-            return # Прерываем цепочку, команды не выполнятся
+            return #прерываем цепочку, команды не выполнятся
             
-        # Для callback-кнопок и прочего просто пропускаем дальше
+        #для callback-кнопок и прочего просто пропускаем дальше
         return await handler(event, data)
 
-# --- БАЗА ДАННЫХ (POSTGRESQL) ---
+#бд (POSTGRESQL)
 async def init_db():
     global db_pool
     dsn = DATABASE_URL.replace("postgres://", "postgresql://")
@@ -182,6 +180,13 @@ async def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     decided_at TIMESTAMPTZ
                 );
+                CREATE TABLE IF NOT EXISTS changelog_entries (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    is_visible BOOLEAN NOT NULL DEFAULT TRUE
+                );
             """)
             await conn.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
@@ -233,7 +238,6 @@ async def refresh_shop_if_needed(*, notify=True):
             shop_data['items'] = await conn.fetch("SELECT * FROM items ORDER BY RANDOM() LIMIT 4")
             shop_data['titles'] = await conn.fetch("SELECT * FROM titles WHERE is_admin_only = FALSE ORDER BY RANDOM() LIMIT 4")
             
-            # --- НОВЫЙ БЛОК: РАССЫЛКА ---
             if notify:
                 users_to_notify = await conn.fetch("SELECT user_id FROM users WHERE notifications_enabled = TRUE")
                 for u in users_to_notify:
@@ -246,7 +250,6 @@ async def refresh_shop_if_needed(*, notify=True):
                         await asyncio.sleep(0.05) # Лимиты Telegram
                     except Exception:
                         pass # Юзер мог заблокировать бота
-            # -----------------------------
 
         shop_data['last_update'] = datetime.now(timezone.utc)
         logging.info("🏪 Ассортимент магазина обновлен!")
@@ -324,7 +327,7 @@ async def site_application(request: web.Request):
     clean_username = normalize_username(username)
     if not re.fullmatch(r"[a-zA-Z0-9_]{5,32}", clean_username):
         return web.json_response(
-            {"error": "Укажи корректный Telegram username без пробелов."},
+            {"error": "Укажи корректный юз без пробелов."},
             status=400,
         )
 
@@ -345,7 +348,7 @@ async def site_application(request: web.Request):
         "🌐 <b>Новая заявка на сайт</b>\n\n"
         f"Username: <b>@{clean_username}</b>\n"
         f"ID в базе: <code>{user_id or 'не найден'}</code>\n\n"
-        "Решение откроет или закроет доступ к информационной части сайта."
+        "Привет, я из будущего, снова выбираешь, кого пускать на сайт?"
     )
     await bot.send_message(ADMIN_USER_ID, text, reply_markup=application_keyboard(token), parse_mode="HTML")
     return web.json_response({"token": token, "status": "pending"})
@@ -377,6 +380,20 @@ async def site_stats(request: web.Request):
             """
         )
     return web.json_response({"top": [dict(row) for row in top]})
+
+
+async def site_changelog(request: web.Request):
+    async with db_pool.acquire() as conn:
+        entries = await conn.fetch(
+            """
+            SELECT id, title, body, published_at
+            FROM changelog_entries
+            WHERE is_visible = TRUE
+            ORDER BY published_at DESC, id DESC
+            LIMIT 50
+            """
+        )
+    return web.json_response({"entries": [dict(entry) for entry in entries]}, default=str)
  
         
 async def save_user_role(user_id: int, username: str, role_id: int):
@@ -409,11 +426,11 @@ async def get_roles_keyboard(current_user_id: int):
     builder = InlineKeyboardBuilder()
     for role in roles:
         if role['occupied_by'] and role['occupied_by'] != current_user_id:
-            btn_text = f"🔒 {role['name']} (Занято)"
+            btn_text = f"🔒 (Занято) {role['name']}"
         elif role['occupied_by'] == current_user_id:
-            btn_text = f"✅ {role['name']} (Твой перс)"
+            btn_text = f"✅ (Твой перс) {role['name']}"
         else:
-            btn_text = f"✨ {role['name']}"
+            btn_text = f"✨ (Свободно) {role['name']}"
             
         builder.button(text=btn_text, callback_data=f"role_{role['id']}")
     builder.adjust(1)
@@ -429,12 +446,14 @@ def render_duel_text(duel_id: str):
         filled = int(percent * 10)
         return "🟩" * filled + "⬜️" * (10 - filled)
         
-    text = f"⚔️ <b>СМЕРТЕЛЬНАЯ БИТВА, ЫЫЫ</b> ⚔️\n\n"
+    text = f"⚔️ <b>Ого, да тут битва как в аниме</b> ⚔️\n\n"
     text += f"🎮 <b>{p1['name']}</b> [{p1['role']}]\n"
-    text += f"HP: {p1['hp']}/{p1['max_hp']} {make_hp_bar(p1['hp'], p1['max_hp'])}\n\n"
+    p1_resource = f" | Души: {p1['souls']}" if p1['type'] == 'souls' else ""
+    text += f"HP: {p1['hp']}/{p1['max_hp']}{p1_resource} {make_hp_bar(p1['hp'], p1['max_hp'])}\n\n"
     
     text += f"🎮 <b>{p2['name']}</b> [{p2['role']}]\n"
-    text += f"HP: {p2['hp']}/{p2['max_hp']} {make_hp_bar(p2['hp'], p2['max_hp'])}\n\n"
+    p2_resource = f" | Души: {p2['souls']}" if p2['type'] == 'souls' else ""
+    text += f"HP: {p2['hp']}/{p2['max_hp']}{p2_resource} {make_hp_bar(p2['hp'], p2['max_hp'])}\n\n"
     
     text += f"📜 <b>Лог:</b> {duel['log']}\n\n"
     
@@ -446,10 +465,70 @@ def get_duel_keyboard(duel_id: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="⚔️ Атака", callback_data=f"fight_atk_{duel_id}")
     builder.button(text="🛡 Блок", callback_data=f"fight_def_{duel_id}")
-    builder.button(text="✨ Навык", callback_data=f"fight_skill_{duel_id}")
+    builder.button(text="✨ Спец. Атака", callback_data=f"fight_skill_{duel_id}")
     builder.button(text="🎒 Предмет", callback_data=f"fight_item_{duel_id}")
     builder.adjust(2, 2)
     return builder.as_markup()
+
+
+def get_souls_keyboard(duel_id: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💚 Хил за 2 души", callback_data=f"souls_heal_{duel_id}")
+    builder.button(text="🎯 Выстрел за 3 души", callback_data=f"souls_shot_{duel_id}")
+    builder.button(text="🔙 Назад", callback_data=f"souls_back_{duel_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def finish_duel_action(callback, duel_id, attacker, defender, *, pass_turn=True, answer_text=None):
+    duel = active_duels[duel_id]
+
+    if defender['hp'] <= 0 or attacker['hp'] <= 0:
+        for player in (attacker, defender):
+            if player['hp'] <= 0 and player.get('revive_once') and not player['revived']:
+                player['hp'] = max(1, int(player['max_hp'] * 0.4))
+                player['revived'] = True
+                duel['log'] = "🔆 Игрок помогает Нико, файл сохранения загружен!"
+
+        if attacker['hp'] <= 0 or defender['hp'] <= 0:
+            defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
+            winner = attacker if defender['hp'] <= 0 else defender
+            win_xp, win_credits = 75, 130
+            text = render_duel_text(duel_id) + (
+                f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n"
+                f"🎁 <b>Награда:</b> +{win_xp} XP и +{win_credits} 💰\n"
+                f"💀 Бой окончен."
+            )
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET credits = credits + $1, xp = xp + $2, wins = COALESCE(wins, 0) + 1 WHERE user_id = $3",
+                    win_credits, win_xp, winner['id']
+                )
+            del active_duels[duel_id]
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(text, parse_mode="HTML")
+            await callback.answer(answer_text or "Ты выиграл.")
+            return
+
+    if pass_turn:
+        duel['turn'] = defender['id']
+        duel['turn_count'] += 1
+        defender['item_used'] = False
+
+    text = render_duel_text(duel_id)
+    kb = get_duel_keyboard(duel_id)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer(answer_text or "")
 
 
 def get_db_pool():
@@ -471,10 +550,10 @@ async def setup_bot_commands(bot: Bot):
         BotCommand(command="profile", description="👤 Профиль, статы и рюкзак"),
         BotCommand(command="daily", description="🎁 Забрать ежедневную награду"),
         BotCommand(command="shop", description="🏪 Магазин предметов и титулов"),
-        BotCommand(command="slots", description="🎰 Казино (слоты)"),
+        BotCommand(command="slots", description="🎰 Казино (классические слоты)"),
         BotCommand(command="dice", description="🎲 Кости (пвп)"),
         BotCommand(command="duel", description="⚔️ Вызвать на дуэль (ответь на сообщение)"),
-        BotCommand(command="top", description="📊 Топ игроков чата"),
+        BotCommand(command="top", description="📊 Топ чата"),
         BotCommand(command="title", description="👑 Управление титулами"),
     ]
     await bot.set_my_commands(commands)
@@ -489,7 +568,7 @@ get_shop_keyboard = register_shop_handlers(
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
     kb = await get_roles_keyboard(message.from_user.id)
-    await message.answer("Выбирай себе персонажа:", reply_markup=kb)
+    await message.answer("Выбери персонажа:", reply_markup=kb)
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
@@ -500,7 +579,7 @@ async def cmd_profile(message: types.Message):
         await message.answer("🎭 Персонаж: Не выбран (выбери через /role)")
         return
         
-    role_str = user_data['role_name'] or "Без роли"
+    role_str = user_data['role_name'] or "Без роли (лох)"
     credits_val = user_data['credits'] or 0
     xp_val = user_data['xp'] or 0
     msg_count = user_data['msg_count'] or 0
@@ -525,16 +604,16 @@ async def cmd_profile(message: types.Message):
             WHERE user_id = $1 AND count > 0
         """, user_id)
 
-    # Красивый вывод инвентаря
+    #профиль 2.0
     if inv_items:
         inv_text = "\n".join([f"🔸 <b>{item['name']}</b>: <code>{item['total_count']} шт.</code>" for item in inv_items])
     else:
         inv_text = "<i>Пусто...</i>"
         
-    # Генерируем полоску опыта
+    # опыт
     xp_bar = generate_progress_bar(xp_val, next_xp, length=12)
     
-    # Собираем красивую "карточку"
+    # текст
     status = (
         f"🪪 <b>КАРТОЧКА ИГРОКА: {message.from_user.first_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -552,12 +631,12 @@ async def cmd_profile(message: types.Message):
         f"{inv_text}"
     )
     
-    # Кнопка для настройки уведомлений
+    # уведомления
     builder = InlineKeyboardBuilder()
     notif_text = "🔕 Выключить рассылку" if notif_enabled else "🔔 Включить рассылку"
     builder.button(text=notif_text, callback_data="toggle_notif")
     
-    # Отправляем обновленный профиль
+    # отправка
     await message.answer(status, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "toggle_notif")
@@ -565,29 +644,29 @@ async def cb_toggle_notif(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     
     async with db_pool.acquire() as conn:
-        # Узнаем текущий статус и меняем на противоположный
+        # статус рассылки в БД
         current_status = await conn.fetchval("SELECT notifications_enabled FROM users WHERE user_id = $1", user_id)
         new_status = not current_status
         await conn.execute("UPDATE users SET notifications_enabled = $1 WHERE user_id = $2", new_status, user_id)
     
-    # Показываем всплывающее уведомление
-    status_msg = "включены ✅" if new_status else "выключены ❌"
+    # уведа о результате
+    status_msg = "включена ✅" if new_status else "выключена ❌"
     await callback.answer(f"Рассылка {status_msg}!", show_alert=True)
     
-    # Формируем новую кнопку
+    # новая клавиатура
     builder = InlineKeyboardBuilder()
     notif_text = "🔕 Выключить рассылку" if new_status else "🔔 Включить рассылку"
     builder.button(text=notif_text, callback_data="toggle_notif")
     
-    # Элегантно обновляем только клавиатуру под сообщением
+    # только клава
     try:
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
     except Exception:
-        pass # Игнорируем ошибку, если вдруг API телеграма ругнется на то, что клавиатура не изменилась
+        pass # игнор апи тг
     
-# Словарь для активных боев в памяти: { duel_id: { "p1": id, "p2": id, "turn": id, ... } }
+# словарь боев для бд
 active_duels = {}
-duel_invites = {} # Для хранения непринятых вызовов
+duel_invites = {} # вызовов
 
 register_user_handlers(
     dp,
@@ -603,15 +682,15 @@ async def cmd_duel(message: types.Message):
     try:
         user_id = message.from_user.id
         
-        # Проверяем, есть ли у инициатора персонаж
+        # перса чекает
         user_data = await get_user(user_id)
         if not user_data or not user_data['role_id']:
-            await message.answer("❌ Сначала выбери персонажа через /role!")
+            await message.answer("❌ Сначала выбери перса через /role!")
             return
 
-        # Проверяем, ответил ли игрок реплаем на сообщение соперника
+        # проверка реплая
         if not message.reply_to_message or message.reply_to_message.from_user.is_bot:
-            await message.answer("⚠️ Чтобы вызвать на дуэль, ответь командой /duel на сообщение противника в чате!")
+            await message.answer("⚠️ Чтобы вызвать на дуэль, ответь командой /duel на сообщение противника!")
             return
 
         target_id = message.reply_to_message.from_user.id
@@ -630,19 +709,19 @@ async def cmd_duel(message: types.Message):
         # Создаем инлайн-кнопки принятия вызова
         builder = InlineKeyboardBuilder()
         builder.button(text="⚔️ Принять вызов", callback_data=f"duel_accept_{user_id}_{target_id}")
-        builder.button(text="❌ Отказаться", callback_data=f"duel_decline_{target_id}")
+        builder.button(text="🤡 Отказаться", callback_data=f"duel_decline_{target_id}")
         builder.button(text="🛑 Отозвать", callback_data=f"duel_cancel_{user_id}")
         builder.adjust(2, 1)
 
         await message.answer(
             f"⚔️ <b>Вызов на дуэль!</b>\n\n"
-            f"@{message.from_user.username or message.from_user.first_name} вызывает {target_name} на мортал комбат!\n"
+            f"@{message.from_user.username or message.from_user.first_name} вызывает {target_name} на дуэль!\n"
             f"Примешь вызов?",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
     except Exception as e:
-        # Если код снова упадет, бот не промолчит, а выведет причину краша прямо в чат
+        #проверка на системные ошибки
         await message.answer(f"🔧 Ого, тута системная ошибка: {e}, зовите Сиаленса!")
 
 @dp.message(Command("title"))
@@ -654,7 +733,7 @@ async def cmd_title(message: types.Message):
         if not user:
             return
         
-        # Достаем все титулы, которые купил игрок
+        #титулы, которые купил юзер
         bought_titles = await conn.fetch("""
             SELECT t.id, t.name 
             FROM user_titles ut 
@@ -665,11 +744,11 @@ async def cmd_title(message: types.Message):
     xp = user['xp'] or 0
     builder = InlineKeyboardBuilder()
     
-    # 1. Кнопка сброса на обычный ранговый титул (бесплатный)
+    # кнопка сброса на обычный ранговый титул (бесплатный)
     current_rank = get_rank_title(xp)
     builder.button(text=f"🔰 Вернуть ранговый: [{current_rank}]", callback_data="equip_title_0")
     
-    # 2. Кнопки с купленными титулами
+    # кнопки с купленными титулами
     for t in bought_titles:
         mark = "✅ " if user['title_id'] == t['id'] else "👑 "
         builder.button(text=f"{mark}{t['name']}", callback_data=f"equip_title_{t['id']}")
@@ -677,7 +756,7 @@ async def cmd_title(message: types.Message):
     builder.adjust(1)
     await message.answer("<b>Выбери титул, который хочешь носить:</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
 
-# Хендлер переодевания титула
+#хендлер переодевания титула
 @dp.callback_query(F.data.startswith("equip_title_"))
 async def cb_equip_title(callback: types.CallbackQuery):
     title_id = int(callback.data.split("_")[2])
@@ -705,17 +784,16 @@ register_moderation_handlers(
     parse_time=parse_time,
 )
 
-# --- ГЕНЕРАТОР ВКЛАДОК ТОПА ---
+#ГЕНЕРАТОР ВКЛАДОК ТОПА
 def get_top_keyboard(current_tab="xp"):
     builder = InlineKeyboardBuilder()
-    # Подсвечиваем активную вкладку галочкой
     builder.button(text="✅ ⭐️ Опыт" if current_tab == "xp" else "⭐️ Опыт", callback_data="top_xp")
     builder.button(text="✅ 🏆 Победы" if current_tab == "wins" else "🏆 Победы", callback_data="top_wins")
     builder.button(text="✅ 💬 Актив" if current_tab == "msg" else "💬 Актив", callback_data="top_msg")
     builder.adjust(3)
     return builder.as_markup()
 
-# Универсальная функция отрисовки топа
+# функция отрисовки топа
 async def render_top(event, tab, is_edit=False):
     queries = {
         "xp": ("xp", "⭐️ ОПЫТУ", "XP"),
@@ -725,7 +803,7 @@ async def render_top(event, tab, is_edit=False):
     col, title, suffix = queries[tab]
     
     async with db_pool.acquire() as conn:
-        # Вытаскиваем топ-10, у кого значение больше нуля
+        #топ-10 по выбранной колонке
         users = await conn.fetch(f"""
             SELECT username, COALESCE({col}, 0) as val 
             FROM users 
@@ -738,7 +816,7 @@ async def render_top(event, tab, is_edit=False):
         text += "<i>Пока что тут пусто...</i>"
     else:
         for i, u in enumerate(users, 1):
-            # Медали для первой тройки
+            # медали для первых трёх мест
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
             name = u['username'] or "Аноним"
             text += f"{medal} <b>{name}</b> — {u['val']} {suffix}\n"
@@ -753,7 +831,7 @@ async def render_top(event, tab, is_edit=False):
 
 @dp.message(Command("top"))
 async def cmd_top(message: types.Message):
-    # По умолчанию открываем топ по опыту
+    # топ опыта по умолчанию
     await render_top(message, "xp", is_edit=False)
 
 @dp.message(F.new_chat_members)
@@ -762,7 +840,7 @@ async def welcome_new_members(message: types.Message):
         if member.is_bot:
             continue
 
-        # Вносим новичка в БД
+        # добавляем нового пользователя в бд, если его там нет
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
@@ -775,8 +853,9 @@ async def welcome_new_members(message: types.Message):
 
         text = (
             f"🙌 <b>Велком, {member.first_name}!</b>\n\n"
-            f"Я Картер (Мейби ты уже меня знаешь). *тут вся инфа и поздравления, потом вставлю*\n\n"
-            f"Для начала тебе начислен стартовый баланс <b>100 💰</b>. Веселись! 😉\n"
+            f"Я Картер (Мейби ты уже меня знаешь). Это оч крутой чат, бла-бла-бла.\n\n"
+            f"Вся инфа на сайте https://sialensxd.github.io/indi-space-hub/ мой функционал спроси у Админов.\n\n"
+            f"Для начала тебе начислен стартовый баланс <b>100 💰</b>. Постарайся выжить!\n"
             
         )
         await message.answer(text, parse_mode="HTML")
@@ -820,7 +899,7 @@ async def decide_site_application(callback: types.CallbackQuery, status: str):
             await bot.send_message(
                 application["user_id"],
                 "✅ Тебя впустили на информационную часть сайта!" if approved
-                else "❌ Заявку отклонили. Спасибо за интерес к чату.",
+                else "❌ Заявку отклонили. Спасибо за проявленный интерес к чату.",
             )
         except Exception:
             logging.info("Не удалось уведомить пользователя @%s", application["username"])
@@ -843,25 +922,25 @@ async def callbacks_num(callback: types.CallbackQuery):
     role_id = int(callback.data.split("_")[1])
     is_admin = username.lower() in [a.lower() for a in ADMIN_USERNAMES]
 
-    # --- КАПКАН НА РОЛЬ БОГА (999) ---
+    #роль бога
     if role_id == 999:
         if user_id != ADMIN_USER_ID:
             mockery = [
-                "🤡 Губу раскатал! Эта роль только для всемилюбимого Создателя.",
+                "🤡 Хуй тебе. Эта роль только для всемилюбимого Сиаленса.",
                 "⚡️ Твоё смертное тело не выдержит эту силу. Выбери что-то попроще, гой.",
-                "🤣 ПХАХХАХА, не-а. Иди играй за Санса, упырь.",
+                "🤣 ХАХХАХА, не-а. Простокам не видать такой силы.",
                 "🛑 ОШИБКА ДОСТУПА. Уровень прав: ОСЕЛ. Требуется: БОГ."
             ]
             await callback.answer(random.choice(mockery), show_alert=True)
             return 
         else:
-            await callback.answer("Добро пожаловать в режим Бога, Создатель. 👑", show_alert=True)
+            await callback.answer("Добро пожаловать в режим Бога, Сэр.", show_alert=True)
     # ---------------------------------
 
     user_data = await get_user(user_id)
 
     if user_data and user_data['role_id'] == role_id:
-        await callback.answer("Ты уже выбрал этого персонажа! 👺", show_alert=True)
+        await callback.answer("Ты уже выбрал этого персонажа, ишак! 👺", show_alert=True)
         return
 
     if user_data and user_data['role_id'] is not None:
@@ -878,7 +957,7 @@ async def callbacks_num(callback: types.CallbackQuery):
 
     await save_user_role(user_id, username, role_id)
     updated = await get_user(user_id)
-    await callback.message.edit_text(f"Забронирован персонаж: {updated['role_name']}", parse_mode="Markdown")
+    await callback.message.edit_text(f"Выбран персонаж: {updated['role_name']}", parse_mode="Markdown")
     await callback.answer("Готово!")
 
 @dp.callback_query(F.data.startswith("duel_decline_"))
@@ -889,14 +968,14 @@ async def cb_duel_decline(callback: types.CallbackQuery):
         await callback.answer("Это вызывают не тебя!", show_alert=True)
         return
         
-    await callback.message.edit_text("🏃‍♂️ Вызов на дуэль был трусливо отклонен, кто-то пропитушился.")
+    await callback.message.edit_text("Вызов на дуэль был трусливо отклонен, кое-кто пропитушился. 🤡")
 
 @dp.callback_query(F.data.startswith("duel_cancel_"))
 async def cb_duel_cancel(callback: types.CallbackQuery):
     initiator_id = int(callback.data.split("_")[2])
     
     if callback.from_user.id != initiator_id:
-        await callback.answer("Только тот, кто бросил вызов, может его отозвать!", show_alert=True)
+        await callback.answer("Только тот, кто бросил вызов, может его отозвать.", show_alert=True)
         return
         
     await callback.message.edit_text("🛑 Вызов на дуэль был отозван.")
@@ -908,17 +987,17 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         p1_id, p2_id = int(parts[2]), int(parts[3])
         
         if callback.from_user.id != p2_id:
-            await callback.answer("Это вызывают не тебя!", show_alert=True)
+            await callback.answer("Не тебя вызывают.", show_alert=True)
             return
         
         p1_data = await get_user(p1_id)
         p2_data = await get_user(p2_id)
         
         if not p1_data or not p2_data:
-            await callback.message.edit_text("❌ Ошибка: кто-то из игроков пропал из бд.")
+            await callback.message.edit_text("❌ Ошибка: кто-то из игроков пропал из бд, зовите Сиаленса.")
             return
             
-# Берем ID роли (числа от 1 до 6)
+# айди 
         p1_role_id = p1_data['role_id']
         p2_role_id = p2_data['role_id']
         
@@ -930,8 +1009,8 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         turn_id = random.choice([p1_id, p2_id])
         
         active_duels[duel_id] = {
-            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False},
-            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False},
+            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False, "souls": 0, "item_used": False, "revive_once": c1.get('revive_once', False), "revived": False},
+            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False, "souls": 0, "item_used": False, "revive_once": c2.get('revive_once', False), "revived": False},
             "turn": turn_id,
             "turn_count": 0,
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
@@ -941,7 +1020,7 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         text = render_duel_text(duel_id)
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception as e:
-        await callback.answer(f"❌ Ошибка старта боя: {e}", show_alert=True)
+        await callback.answer(f"❌ Ошибка старта боя: {e}, зовите Сиаленса.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("fight_"))
 async def cb_fight(callback: types.CallbackQuery):
@@ -951,7 +1030,7 @@ async def cb_fight(callback: types.CallbackQuery):
     duel_id = parts[2]
     
     if duel_id not in active_duels:
-        await callback.answer("Этот бой уже завершен!", show_alert=True)
+        await callback.answer("Этот бой уже завершен.", show_alert=True)
         return
         
     duel = active_duels[duel_id]
@@ -959,11 +1038,11 @@ async def cb_fight(callback: types.CallbackQuery):
     is_p2 = (user_id == duel['p2']['id'])
     
     if not (is_p1 or is_p2):
-        await callback.answer("Ты не участвуешь в этом бою! 👺", show_alert=True)
+        await callback.answer("Ты не участвуешь в этом бою, убери свои сардельки! 👺", show_alert=True)
         return
         
     if duel['turn'] != user_id:
-        await callback.answer("⏳ Сейчас не твой ход!", show_alert=True)
+        await callback.answer("⏳ Остынь, паровоз, сейчас не твой ход.", show_alert=True)
         return
         
     attacker = duel['p1'] if is_p1 else duel['p2']
@@ -971,9 +1050,9 @@ async def cb_fight(callback: types.CallbackQuery):
     
     log_msg = ""
     attacker['block'] = False 
-    turn_gif = None # <--- Переменная для хранения гифки на этот ход
+    turn_gif = None # хранение гифки на этот ход
     
-    # 1. ПРОВЕРКА НА ОГЛУШЕНИЕ (Кнаклбластер V2)
+    #кнаклбластер
     if attacker['stun']:
         attacker['stun'] = False
         log_msg = f"💫 {attacker['name']} оглушен и пропускает этот ход!"
@@ -983,10 +1062,10 @@ async def cb_fight(callback: types.CallbackQuery):
             if attacker['type'] == 'god':
                 dmg = attacker['atk']
                 defender['hp'] -= dmg
-                log_msg = f"⚡️ <b>{attacker['name']}</b> наносит {dmg} урона силой Создателя!"
+                log_msg = f"🥵 <b>{attacker['name']}</b> танцует тверк и наносит {dmg} морального урона!"
             elif defender['type'] == 'god':
-                attacker['hp'] -= 9999
-                log_msg = f"⚡️ Твоя жалкая попытка коснуться Создателя — тщетна! <b>{attacker['name']}</b> расщеплен на атомы (-9999 HP)."
+                attacker['hp'] -= 99999
+                log_msg = f"🤩 Твоя жалкая попытка коснуться Всевышнего — тщетна и за это... <b>{attacker['name']}</b> был отправлен на сво (-99999 HP)."
             else:
                 dmg = max(0, attacker['atk'] + random.randint(0, 0))
                 
@@ -999,21 +1078,21 @@ async def cb_fight(callback: types.CallbackQuery):
                 
                 if random.random() < miss_chance:
                     dmg = 0
-                    log_msg = f"💨 {attacker['name']} промахивается по противнику!"
-                elif (defender['type'] == 'karma' and random.random() < 0.95) or (defender['niko_dodge'] and random.random() < 0.60):
+                    log_msg = f"💨ХАХА! {attacker['name']} промахивается по противнику!"
+                elif (defender['type'] == 'karma' and random.random() < 0.93) or (defender['niko_dodge'] and random.random() < 0.60):
                     defender['niko_dodge'] = False 
                     dmg = 0
-                    log_msg = f"💨 {defender['name']} ловко увернулся от атаки!"
+                    log_msg = f"💨ХАХА! {defender['name']} увернулся от атаки!"
                 
-                # --- ЛОГИКА ПАРИРОВАНИЯ И ГИФКИ V1 ---
+                # парирование в1 и фмкс гифки
                 elif defender['parry']:
                     defender['parry'] = False 
                     if random.random() < 1.0:
                         reflected_dmg = dmg 
                         attacker['hp'] -= reflected_dmg 
                         dmg = 0 
-                        log_msg = f"🪙 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно!"
-                        turn_gif = SKILL_GIFS.get("vampire") # Гифка парирования вылетает ТОЛЬКО сейчас!
+                        log_msg = f"💥 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно!"
+                        turn_gif = SKILL_GIFS.get("vampire") # гифка для парирования
                 
                 if dmg > 0:
                     if defender['block']:
@@ -1021,31 +1100,35 @@ async def cb_fight(callback: types.CallbackQuery):
                         log_msg = f"🛡 {defender['name']} блокирует часть урона!\n"
                     
                     defender['hp'] -= dmg
-                    log_msg += f"🗡 {attacker['name']} наносит {dmg} урона!"
+                    log_msg += f"👊 {attacker['name']} наносит {dmg} урона!"
+
+                    if attacker['type'] == 'souls':
+                        attacker['souls'] += 1
+                        log_msg += f" 🌀 Души: {attacker['souls']}"
                     
                     if attacker['type'] == 'karma':
                         
                         karma_dmg = max(1, int(defender['max_hp'] * 0.07))
                         defender['hp'] -= karma_dmg
-                        log_msg += f" ☠️ Карма сжигает еще {karma_dmg} HP!"
+                        log_msg += f" ☠️ Карма сжигает {karma_dmg} HP!"
                     
                     if attacker['type'] == 'vampire':
                         heal = max(1, int(dmg * 0.4))
                         attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
-                        log_msg += f" 🩸 Вампиризм: +{heal} HP!"
+                        log_msg += f" 🩸 Отхил: +{heal} HP!"
                 
         elif action == "def":
             attacker['block'] = True
-            log_msg = f"🛡 {attacker['name']} уходит в железный блок."
+            log_msg = f"🛡 {attacker['name']} уходит в блок."
             
         elif action == "skill":
             if attacker['cd'] > 0:
-                await callback.answer(f"⏳ Навык перезаряжается! Осталось ходов: {attacker['cd']}", show_alert=True)
+                await callback.answer(f"⏳ Навык на кд! Осталось ходов: {attacker['cd']}", show_alert=True)
                 return
             
             r_type = attacker['type'] 
             
-            # --- ПРИВЯЗЫВАЕМ ГИФКИ КО ВСЕМ НАВЫКАМ, КРОМЕ V1 ---
+            # гиф навыков (кроме в1)
             if r_type != "vampire":
                 turn_gif = SKILL_GIFS.get(r_type)
             
@@ -1055,52 +1138,66 @@ async def cb_fight(callback: types.CallbackQuery):
                 attacker['cd'] = 0
                 dmg = int(defender['max_hp'] * 0.99)
                 defender['hp'] -= dmg
-                log_msg = f"🤧 <b>{attacker['name']}</b> чихнул и стер <b>{defender['name']}</b> в пыль на {dmg} урона!"
+                log_msg = f"😏 <b>{attacker['name']}</b> начал заигрывать с <b>{defender['name']}</b> и у него случился моральный распад. Нанесено {dmg} морального урона!"
                     
             elif r_type == "berserk":
                 attacker['cd'] = 3
                 if random.random() < 0.35:
-                    log_msg = f"💥 {attacker['name']} кричит «JUDGMENT!», но промахивается!"
+                    log_msg = f"💥 {attacker['name']} кричит «ЖАААЖМЕНТ!», но промахивается!"
                 elif is_karma_dodge:
-                    log_msg = f"💨 {defender['name']} ловко увернулся от Жажмента"
+                    log_msg = f"💨ЙО! {defender['name']} увернулся от Жажмента"
                 else:
-                    defender['hp'] -= 40
-                    log_msg = f"⚖️ {attacker['name']} обрушивает «JUDGMENT!» Нанесено 40 урона!"
+                    defender['hp'] -= 45
+                    log_msg = f"⚖️ {attacker['name']} обрушивает «ЖАААЖМЕНТ!», Нанесено 45 урона!"
                     
             elif r_type == "enrage": 
                 attacker['cd'] = 3
                 if is_karma_dodge:
-                    log_msg = f"💨 {defender['name']} ловко увернулся от Кнаклбластера!"
+                    log_msg = f"💨ВОУ! {defender['name']} увернулся от Кнаклбластера!"
                 else:
                     defender['stun'] = True
-                    defender['hp'] -= 15 
-                    log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 15 урона! {defender['name']} оглушен!"
+                    defender['hp'] -= 20
+                    log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 20 урона! {defender['name']} решил поспать."
                     
             elif r_type == "vampire": 
                 attacker['cd'] = 3
                 attacker['parry'] = True
-                log_msg = f"🪙 {attacker['name']} готовится парировать следующую атаку!"
+                log_msg = f"😈 {attacker['name']} готовится парировать следующую атаку!"
                 
             elif r_type == "karma": 
                 attacker['cd'] = 3
                 defender['blind'] = True
-                log_msg = f"🦴 {attacker['name']} снижает точность {defender['name']}!"
+                log_msg = f"💫 {attacker['name']} снижает точность {defender['name']}!"
                     
             elif r_type == "light": 
                 attacker['cd'] = 1
                 attacker['niko_dodge'] = True
-                log_msg = f"💡 {attacker['name']} готовится увернуться."
+                async with db_pool.acquire() as conn:
+                    inv = await conn.fetch(
+                        "SELECT i.id, i.name, inv.count FROM inventory inv JOIN items i ON inv.item_id = i.id WHERE inv.user_id = $1 AND inv.count > 0",
+                        attacker['id']
+                    )
+                if inv and not attacker['item_used']:
+                    builder = InlineKeyboardBuilder()
+                    for item in inv:
+                        builder.button(text=f"🧧 {item['name']} ({item['count']} шт)", callback_data=f"useitem_{duel_id}_{item['id']}_light")
+                    builder.button(text="🔙 Отмена", callback_data=f"fight_back_{duel_id}")
+                    builder.adjust(1)
+                    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+                    return
+                log_msg = f"💡 {attacker['name']} готовится увернуться, но в рюкзаке нет предмета."
                 
             elif r_type == "souls": 
-                attacker['cd'] = 2
-                heal = int(attacker['max_hp'] * 0.25)
-                attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
-                log_msg = f"🌀 {attacker['name']} использует «Фокус» и восстанавливает {heal} HP!"
+                await callback.message.edit_reply_markup(reply_markup=get_souls_keyboard(duel_id))
+                return
             else:
-                log_msg = f"У {attacker['name']} нет особых навыков."
+                log_msg = f"У {attacker['name']} нет особых навыков. Ну и лох XD"
             
         elif action == "item":
-            # Ищем предметы в БД
+            if attacker['item_used']:
+                await callback.answer("🎒 За ход можно использовать только один предмет.", show_alert=True)
+                return
+            #поиск в ьд
             async with db_pool.acquire() as conn:
                 inv = await conn.fetch("""
                     SELECT i.id, i.name, inv.count 
@@ -1110,92 +1207,29 @@ async def cb_fight(callback: types.CallbackQuery):
                 """, attacker['id'])
             
             if not inv:
-                await callback.answer("🎒 Твой рюкзак абсолютно пуст!", show_alert=True)
+                await callback.answer("🎒 У тебя нихуя нету.", show_alert=True)
                 return
             
-            # Строим клавиатуру с инвентарем (вместо кнопок боя)
+            #клава
             builder = InlineKeyboardBuilder()
             for item in inv:
                 builder.button(
-                    text=f"🧪 {item['name']} ({item['count']} шт)", 
+                    text=f"🧧 {item['name']} ({item['count']} шт)", 
                     callback_data=f"useitem_{duel_id}_{item['id']}"
                 )
             builder.button(text="🔙 Отмена", callback_data=f"fight_back_{duel_id}")
             builder.adjust(1)
             
             await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-            return # Прерываем cb_fight, ждем пока игрок выберет предмет
+            return
 
-    # 3. Снижаем кулдаун атакующего (если он есть)
+    # кд меньше на 1
     if attacker['cd'] > 0 and action != "skill":
         attacker['cd'] -= 1
 
     duel['log'] = log_msg
     
-# 4. Проверка на СМЕРТЬ (умер либо защитник, либо атакующий от отдачи)
-    if defender['hp'] <= 0 or attacker['hp'] <= 0:
-        defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
-        winner = attacker if defender['hp'] <= 0 else defender
-        
-        # Настраиваем размер награды
-        win_xp = 50
-        win_credits = 25
-        
-        text = render_duel_text(duel_id)
-        text += (
-            f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n"
-            f"🎁 <b>Награда:</b> +{win_xp} XP и +{win_credits} 💰\n"
-            f"💀 Бой окончен."
-        )
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2, wins = COALESCE(wins, 0) + 1 WHERE user_id = $3", win_credits, win_xp, winner['id'])
-            
-        del active_duels[duel_id]
-        
-        try:
-            await callback.message.delete()
-        except:
-            pass
-        await callback.message.answer(text, parse_mode="HTML")
-        await callback.answer("Победа!")
-        return
-    
-    # 5. Передача хода
-    duel['turn'] = defender['id']
-    duel['turn_count'] += 1
-    
-    text = render_duel_text(duel_id)
-    kb = get_duel_keyboard(duel_id)
-    
-# Если на этом ходу сработала гифка - кидаем медиа-сообщение
-    if turn_gif and not turn_gif.startswith("тут_"):
-        try: await callback.message.delete()
-        except: pass
-        
-        # Текст боя становится подписью (caption) к гифке, а кнопки крепятся снизу
-        await callback.message.answer_animation(
-            animation=turn_gif, 
-            caption=text, 
-            reply_markup=kb, 
-            parse_mode="HTML"
-        )
-    else:
-        # Обычный текстовый ход
-        if duel['turn_count'] % 2 != 0:
-            try: 
-                await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-            except Exception: 
-                # Сработает, если на прошлом ходу была гифка, и мы пытаемся edit_text на медиа-файле
-                try: await callback.message.delete()
-                except: pass
-                await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        else:
-            try: await callback.message.delete()
-            except: pass
-            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        
-    await callback.answer()
+    await finish_duel_action(callback, duel_id, attacker, defender)
     
 @dp.callback_query(F.data.startswith("fight_back_"))
 async def cb_fight_back(callback: types.CallbackQuery):
@@ -1205,14 +1239,53 @@ async def cb_fight_back(callback: types.CallbackQuery):
     kb = get_duel_keyboard(duel_id)
     await callback.message.edit_reply_markup(reply_markup=kb)
 
+
+@dp.callback_query(F.data.startswith("souls_back_"))
+async def cb_souls_back(callback: types.CallbackQuery):
+    duel_id = callback.data.split("_")[2]
+    if duel_id in active_duels:
+        await callback.message.edit_reply_markup(reply_markup=get_duel_keyboard(duel_id))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("souls_heal_") | F.data.startswith("souls_shot_"))
+async def cb_souls_action(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    action, duel_id = parts[1], parts[2]
+    if duel_id not in active_duels:
+        await callback.answer("Этот бой уже завершен.", show_alert=True)
+        return
+    duel = active_duels[duel_id]
+    if duel['turn'] != callback.from_user.id:
+        await callback.answer("⏳ Не твой ход!", show_alert=True)
+        return
+    attacker = duel['p1'] if duel['p1']['id'] == callback.from_user.id else duel['p2']
+    defender = duel['p2'] if attacker is duel['p1'] else duel['p1']
+    cost = 2 if action == "heal" else 3
+    if attacker['type'] != 'souls' or attacker['souls'] < cost:
+        await callback.answer(f"Нужно {cost} души.", show_alert=True)
+        return
+
+    attacker['souls'] -= cost
+    attacker['cd'] = 2
+    if action == "heal":
+        heal = int(attacker['max_hp'] * 0.25)
+        attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
+        duel['log'] = f"🌀 {attacker['name']} тратит 2 души и восстанавливает {heal} HP!"
+    else:
+        defender['hp'] -= 35
+        duel['log'] = f"🎯 {attacker['name']} тратит 3 души и выпускает выстрел на 35 урона!"
+    await finish_duel_action(callback, duel_id, attacker, defender, answer_text="Спец атака использована!")
+
 @dp.callback_query(F.data.startswith("useitem_"))
 async def cb_use_item(callback: types.CallbackQuery):
     parts = callback.data.split("_")
     duel_id, item_id = parts[1], int(parts[2])
+    is_light_skill = len(parts) > 3 and parts[3] == "light"
     user_id = callback.from_user.id
     
     if duel_id not in active_duels:
-        await callback.answer("Бой уже окончен!", show_alert=True)
+        await callback.answer("Бой уже окончен.", show_alert=True)
         return
         
     duel = active_duels[duel_id]
@@ -1223,6 +1296,10 @@ async def cb_use_item(callback: types.CallbackQuery):
     is_p1 = (user_id == duel['p1']['id'])
     attacker = duel['p1'] if is_p1 else duel['p2']
     defender = duel['p2'] if is_p1 else duel['p1']
+
+    if attacker['item_used']:
+        await callback.answer("🎒 За ход можно использовать только один предмет.", show_alert=True)
+        return
     
     async with db_pool.acquire() as conn:
         has_item = await conn.fetchrow("SELECT count FROM inventory WHERE user_id = $1 AND item_id = $2", user_id, item_id)
@@ -1230,12 +1307,12 @@ async def cb_use_item(callback: types.CallbackQuery):
             await callback.answer("Этот предмет закончился!", show_alert=True)
             return
         
-        # Достаем статы предмета и списываем его
+        # ыаыаыаыа
         item = await conn.fetchrow("SELECT name, effect_type, effect_value FROM items WHERE id = $1", item_id)
         await conn.execute("UPDATE inventory SET count = count - 1 WHERE user_id = $1 AND item_id = $2", user_id, item_id)
         await conn.execute("DELETE FROM inventory WHERE count <= 0") # Убираем мусор
         
-    # --- 1. ПРИМЕНЯЕМ ЭФФЕКТ ---
+    # эффекты
     e_type, e_val = item['effect_type'], item['effect_value']
     
     if e_type == 'heal':
@@ -1246,54 +1323,11 @@ async def cb_use_item(callback: types.CallbackQuery):
         duel['log'] = f"💣 {attacker['name']} швыряет {item['name']} в лицо противнику на {e_val} урона!"
     elif e_type == 'buff':
         attacker['atk'] += e_val
-        duel['log'] = f"💉 {attacker['name']} вкалывает {item['name']}. Атака повышена на {e_val}!"
-        
-    if attacker['cd'] > 0:
-        attacker['cd'] -= 1
-
-    # --- 2. ПРОВЕРКА НА СМЕРТЬ (КОПИЯ ИЗ cb_fight) ---
-    if defender['hp'] <= 0 or attacker['hp'] <= 0:
-        defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
-        winner = attacker if defender['hp'] <= 0 else defender
-        
-        # Настраиваем размер награды
-        win_xp = 50
-        win_credits = 25
-        
-        text = render_duel_text(duel_id)
-        text += (
-            f"\n\n🏆 <b>ПОБЕДИТЕЛЬ:</b> {winner['name']}!\n"
-            f"🎁 <b>Награда:</b> +{win_xp} XP и +{win_credits} 💰\n"
-            f"💀 Бой окончен."
-        )
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET credits = credits + $1, xp = xp + $2, wins = COALESCE(wins, 0) + 1 WHERE user_id = $3", win_credits, win_xp, winner['id'])
-            
-        del active_duels[duel_id]
-        try:
-            await callback.message.delete()
-        except: pass
-        await callback.message.answer(text, parse_mode="HTML")
-        await callback.answer("Победа!")
-        return
-
-    # --- 3. ПЕРЕДАЧА ХОДА ---
-    duel['turn'] = defender['id']
-    duel['turn_count'] += 1
-    
-    text = render_duel_text(duel_id)
-    kb = get_duel_keyboard(duel_id)
-    
-    if duel['turn_count'] % 2 != 0:
-        try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        except: pass
-    else:
-        try: await callback.message.delete()
-        except: pass
-        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        
-    await callback.answer("Предмет использован!")
+        duel['log'] = f"💉 {attacker['name']} вкалывает себе в сонную артерию {item['name']}. Атака повышена на {e_val}!"
+    if is_light_skill:
+        duel['log'] = f"💡 {attacker['name']} увернулся и использовал {item['name']}!\n{duel['log']}"
+    attacker['item_used'] = True
+    await finish_duel_action(callback, duel_id, attacker, defender, pass_turn=False, answer_text="Предмет использован!")
 
 @dp.message(F.text & ~F.text.startswith('/'))
 async def track_messages(message: types.Message):
@@ -1307,9 +1341,8 @@ async def track_messages(message: types.Message):
         except Exception:
             pass
 
-    # --- СИСТЕМА СУНДУКОВ ---
-    # Сундуки падают только в группах с шансом, например, 3% на каждое сообщение
-    if message.chat.type in ['group', 'supergroup'] and random.random() < 0.0025:
+    #СИСТЕМА СУНДУКОв
+    if message.chat.type in ['group', 'supergroup'] and random.random() < 0.0050:
         chest_id = str(uuid.uuid4())[:8]
         active_chests.add(chest_id)
         
@@ -1340,12 +1373,12 @@ async def cb_chest_claim(callback: types.CallbackQuery):
         await callback.answer("Увы и ах, сундук уже кто-то обчистил или он испарился!", show_alert=True)
         return
         
-    # Удаляем сундук, чтобы никто больше не забрал
+    # удаляем сундук из активных
     active_chests.remove(chest_id)
-    reward = random.randint(200, 700) # Рандомная награда
+    reward = random.randint(400, 900) # награда за сундук
     
     async with db_pool.acquire() as conn:
-        # Проверяем, есть ли юзер в базе
+        # проверяем, есть ли пользователь в бд
         user_exists = await conn.fetchval("SELECT 1 FROM users WHERE user_id = $1", user_id)
         if not user_exists:
             await conn.execute("INSERT INTO users (user_id, username, credits, xp, role_changes) VALUES ($1, $2, $3, 0, 0)", user_id, callback.from_user.username or "", reward)
@@ -1353,12 +1386,12 @@ async def cb_chest_claim(callback: types.CallbackQuery):
             await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", reward, user_id)
             
     await callback.message.edit_text(
-        f"🎁 <b>{user_name}</b> оказался самым быстрым и забрал из сундука <b>{reward} 💰</b>!",
+        f"🎁У <b>{user_name}</b> оказалась самая накачанная правая рука и он забрал из сундука <b>{reward} 💰</b>!",
         parse_mode="HTML"
     )
     await callback.answer(f"Ты получил {reward} кредитов!")
 
-# --- СЕРВЕР ---
+#СЕРВЕр
 async def health_check(request):
     return web.Response(text="Bot is alive!", status=200)
 
@@ -1394,7 +1427,7 @@ async def on_startup(bot: Bot):
     await refresh_shop_if_needed(notify=False)
     shop_refresh_task = asyncio.create_task(shop_refresh_loop())
     await load_triggers_cache()
-    await setup_bot_commands(bot) # Регистр меню команд
+    await setup_bot_commands(bot) #регистрируем команды бота
     url = webhook_url()
     if url:
         webhook_options = {"drop_pending_updates": True}
@@ -1426,6 +1459,7 @@ def main():
     app.router.add_post('/api/apply', site_application)
     app.router.add_get('/api/applications/{token}', site_application_status)
     app.router.add_get('/api/stats', site_stats)
+    app.router.add_get('/api/changelog', site_changelog)
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
