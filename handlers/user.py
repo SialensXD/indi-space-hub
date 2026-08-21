@@ -34,7 +34,7 @@ def register_user_handlers(
         if message.chat.type == "private":
             text = (
                 f"👋 <b>Здрасьте, {message.from_user.first_name}!</b>\n\n"
-                "Я Картер, бот-ассистент. Вот с чего тебе стоит начать:\n\n"
+                "Я Картер, этакий бот-ассистент. Вот основные команды:\n\n"
                 "🎭 <b>/role</b> — выбрать персонажа для боев\n"
                 "🎁 <b>/daily</b> — забрать ежедневную награду\n"
                 "🏪 <b>/shop</b> — заглянуть в магазин товаров и титулов, там обнова каждые 4 часа\n"
@@ -44,8 +44,8 @@ def register_user_handlers(
             )
         else:
             text = (
-                f"Приветствую, {message.from_user.first_name}! Картер в строю. "
-                "Если нужна помощь, напиши мне в ЛС команду <code>/start</code>."
+                f"Приветствую, {message.from_user.first_name}."
+                "Нужны команды? тогда бегом ко мне в ЛС и там пропиши <code>/start</code>."
             )
         await message.answer(text, parse_mode="HTML")
 
