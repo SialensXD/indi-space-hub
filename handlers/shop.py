@@ -32,7 +32,7 @@ def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, ref
     @dp.message(Command("shop"))
     async def cmd_shop(message: types.Message):
         await refresh_shop_if_needed()
-        text = "🏪<b>Магазин (обновка каждые 4ч):</b>\n\n<i>Раздел: 🎒 Предметы</i>"
+        text = "🏪<b>Магазин (обнова каждые 4 часа):</b>\n\n<i>Раздел: 🎒 Предметы</i>"
         await message.answer(text, reply_markup=get_shop_keyboard(), parse_mode="HTML")
 
     @dp.callback_query(F.data.startswith("shop_tab_"))
@@ -40,7 +40,7 @@ def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, ref
         tab = callback.data.split("_")[2]
         await refresh_shop_if_needed()
         section_name = "🎒 Предметы" if tab == "items" else "🏷 Титулы"
-        text = f"🏪 <b>Магазин (обновка каждые 4ч):</b>\n\n<i>Раздел: {section_name}</i>"
+        text = f"🏪 <b>Магазин (обнова каждые 4 часа):</b>\n\n<i>Раздел: {section_name}</i>"
         await callback.message.edit_text(
             text, reply_markup=get_shop_keyboard(tab), parse_mode="HTML"
         )
