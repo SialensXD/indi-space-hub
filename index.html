@@ -64,7 +64,14 @@
         <a class="button button-primary" href="https://t.me/+89XigOMK6coyNDhi" target="_blank" rel="noreferrer">Войти в чат</a>
       </div>
 
-      <section class="info-section">
+      <div class="info-tabs" role="tablist" aria-label="Разделы информации">
+        <button class="info-tab is-active" id="tab-top" type="button" role="tab" aria-selected="true" aria-controls="panel-top">Топ чата</button>
+        <button class="info-tab" id="tab-characters" type="button" role="tab" aria-selected="false" aria-controls="panel-characters" tabindex="-1">Персонажи</button>
+        <button class="info-tab" id="tab-changelog" type="button" role="tab" aria-selected="false" aria-controls="panel-changelog" tabindex="-1">Чейнджлог</button>
+        <button class="info-tab" id="tab-rules" type="button" role="tab" aria-selected="false" aria-controls="panel-rules" tabindex="-1">Правила</button>
+      </div>
+
+      <section class="info-section info-panel is-active" id="panel-top" role="tabpanel" aria-labelledby="tab-top">
         <div class="section-heading"><span>01</span><h3>Топ чата</h3></div>
         <p class="muted">Данные подтягиваются из статистики Картера. Да-да, он все считает.</p>
         <div class="table-wrap">
@@ -75,7 +82,7 @@
         </div>
       </section>
 
-      <section class="info-section">
+      <section class="info-section info-panel" id="panel-characters" role="tabpanel" aria-labelledby="tab-characters" hidden>
         <div class="section-heading"><span>02</span><h3>Боевые персонажи</h3></div>
         <div class="roles-grid">
           <article class="role-card"><div class="role-icon">[1]</div><h4>V1</h4><p>W.I.P.</p></article>
@@ -84,9 +91,30 @@
         </div>
       </section>
 
-      <section class="info-section changelog">
+      <section class="info-section info-panel changelog" id="panel-changelog" role="tabpanel" aria-labelledby="tab-changelog" hidden>
         <div class="section-heading"><span>03</span><h3>Чейнджлог</h3></div>
         <article class="news-item"><time>20.08.2026</time><p>Здесь будут появляться последние новости и изменения чата.</p></article>
+      </section>
+
+      <section class="info-section info-panel rules" id="panel-rules" role="tabpanel" aria-labelledby="tab-rules" hidden>
+        <div class="section-heading"><span>04</span><h3>Правила чата</h3></div>
+        <div class="rules-list">
+          <article class="rule-group">
+            <h4>1. Общение и спам</h4>
+            <div class="rule"><strong>1.1. Жесткий спам и флуд</strong><p>Запрещено отправлять более 5 одинаковых или бессмысленных сообщений подряд.</p><p class="penalty">Наказание: мут от 30 минут до 2 часов, в зависимости от тяжести нарушения.</p></div>
+            <div class="rule"><strong>1.2. «Лесенка»</strong><p>Запрещено дробить одну мысль на 10 сообщений подряд из одного-двух слов. Пишите более-менее связно.</p><p class="penalty">Наказание: варн, при повторе — мут на 15 минут.</p></div>
+            <div class="rule"><strong>1.3. Капс и злоупотребление эмодзи</strong><p>Запрещено писать более 4 сообщений, состоящих только из капса, а также только из смайликов.</p><p class="penalty">Наказание: варн. За повторное нарушение — мут на 30 минут.</p></div>
+          </article>
+          <article class="rule-group">
+            <h4>2. Токсичность и конфликты</h4>
+            <div class="rule"><strong>2.1. Переход на личности</strong><p>Несмешные оскорбления, беспочвенные наезды и провокации участников к агрессии запрещены. Критикуйте мнение, а не человека.</p><p class="penalty">Наказание: мут от 2 до 6 часов, зависит от жесткости.</p></div>
+          </article>
+          <article class="rule-group">
+            <h4>3. Серьезные косяки</h4>
+            <div class="rule"><strong>3.1. Запрещенный контент</strong><p>Публикация шок-контента, порнографии, призывов к насилию и любого противоправного мусора.</p><p class="penalty">Наказание: бан на один день, при повторе — навсегда.</p></div>
+            <div class="rule"><strong>3.2. Реклама и ссылки</strong><p>Наглый самопиар, спам реферальными ссылками и реклама сторонних ресурсов без согласия владельца.</p><p class="penalty">Наказание: варн и удаление сообщения, при повторе — бан.</p></div>
+          </article>
+        </div>
       </section>
     </section>
   </main>

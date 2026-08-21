@@ -71,6 +71,34 @@ async function loadStats() {
   }
 }
 
+function activateInfoTab(tab) {
+  const tabs = document.querySelectorAll('[role="tab"]');
+  const panels = document.querySelectorAll('[role="tabpanel"]');
+  const panel = document.querySelector(`#${tab.getAttribute("aria-controls")}`);
+  tabs.forEach((item) => {
+    const isActive = item === tab;
+    item.classList.toggle("is-active", isActive);
+    item.setAttribute("aria-selected", isActive);
+    item.tabIndex = isActive ? 0 : -1;
+  });
+  panels.forEach((item) => {
+    item.hidden = item !== panel;
+    item.classList.toggle("is-active", item === panel);
+  });
+}
+
+document.querySelectorAll('[role="tab"]').forEach((tab, index, tabs) => {
+  tab.addEventListener("click", () => activateInfoTab(tab));
+  tab.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const nextTab = tabs[(index + direction + tabs.length) % tabs.length];
+    activateInfoTab(nextTab);
+    nextTab.focus();
+  });
+});
+
 document.querySelector("#begin-button").addEventListener("click", () => showScreen("application"));
 document.querySelector("#retry-button").addEventListener("click", () => showScreen("application"));
 document.querySelector("#application-form").addEventListener("submit", async (event) => {
