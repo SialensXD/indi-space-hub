@@ -164,14 +164,15 @@ tr:hover td { color: var(--white); background: rgba(226,27,35,.08); }
 .role-card:hover { border-color: var(--red); background: rgba(226,27,35,.1); transform: translateY(-5px); }
 .role-card p { margin: 0; color: var(--gray); font-size: 14px; line-height: 1.6; }
 .role-icon { margin-bottom: 25px; color: var(--red); font: 700 28px var(--mono); }
-.news-ticker { position: relative; overflow: hidden; margin-top: 28px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.news-track { display: flex; width: max-content; animation: news-scroll 42s linear infinite; }
-.news-ticker:hover .news-track { animation-play-state: paused; }
-.news-item { display: grid; grid-template-columns: 110px minmax(260px, 360px); gap: 20px; min-height: 150px; padding: 22px 34px 22px 0; margin-right: 34px; border-right: 1px solid var(--line); }
+.ticker-hint { margin: 0 0 14px; color: var(--gray); font: 12px var(--mono); }
+.news-ticker { position: relative; height: 360px; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
+.news-track { display: flex; flex-direction: column; animation: news-scroll 34s linear infinite; }
+.news-ticker.is-paused .news-track { animation-play-state: paused; }
+.news-item { display: grid; grid-template-columns: 110px minmax(260px, 360px); gap: 20px; flex: 0 0 180px; padding: 22px 34px 22px 0; border-bottom: 1px solid var(--line); }
 .news-item time { color: var(--red); font: 14px var(--mono); }
 .news-item h4 { margin: 0 0 10px; font-size: 18px; }
 .news-item p { margin: 0; color: #c6c2bd; line-height: 1.6; }
-@keyframes news-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes news-scroll { from { transform: translateY(0); } to { transform: translateY(-50%); } }
 .rules-list { display: grid; gap: 34px; margin-top: 30px; }
 .rule-group { padding-left: 20px; border-left: 2px solid var(--red-dark); }
 .rule-group h4 { margin-bottom: 22px; font-size: 22px; }
@@ -201,5 +202,6 @@ tr:hover td { color: var(--white); background: rgba(226,27,35,.08); }
   .info-head { align-items: start; flex-direction: column; }
   .info-tabs { margin-inline: -22px; padding-inline: 16px; }
   .roles-grid { grid-template-columns: 1fr; }
+  .news-ticker { height: 420px; }
   .news-item { grid-template-columns: 1fr; gap: 8px; min-width: 270px; }
 }

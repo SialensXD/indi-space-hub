@@ -93,6 +93,7 @@ function renderChangelog(entries) {
     return `<article class="news-item"><time datetime="${escapeHtml(entry.published_at)}">${escapeHtml(date)}</time><div><h4>${escapeHtml(entry.title)}</h4><p>${escapeHtml(entry.body).replaceAll("\n", "<br>")}</p></div></article>`;
   }).join("");
   feed.innerHTML = `<div class="news-track">${cards}${cards}</div>`;
+  feed.addEventListener("click", () => feed.classList.toggle("is-paused"), { once: false });
 }
 
 async function loadChangelog() {
