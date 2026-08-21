@@ -166,7 +166,7 @@ tr:hover td { color: var(--white); background: rgba(226,27,35,.08); }
 .role-icon { margin-bottom: 25px; color: var(--red); font: 700 28px var(--mono); }
 .ticker-hint { margin: 0 0 14px; color: var(--gray); font: 12px var(--mono); }
 .news-ticker { position: relative; height: 360px; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
-.news-track { display: flex; flex-direction: column; animation: news-scroll 34s linear infinite; }
+.news-track { display: flex; flex-direction: column; animation: news-scroll 29s linear infinite; }
 .news-ticker.is-paused .news-track { animation-play-state: paused; }
 .news-item { display: grid; grid-template-columns: 110px minmax(260px, 360px); gap: 20px; flex: 0 0 180px; padding: 22px 34px 22px 0; border-bottom: 1px solid var(--line); }
 .news-item time { color: var(--red); font: 14px var(--mono); }
