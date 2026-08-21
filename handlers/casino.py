@@ -22,7 +22,7 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
         async with db_pool_getter().acquire() as conn:
             user = await conn.fetchrow("SELECT credits FROM users WHERE user_id = $1", user_id)
             if not user or user['credits'] <= 0:
-                await message.answer("❌ У тебя нет кредитов для игры!")
+                await message.answer("Фууу, бомж🤮 У тебя не хватает кредитов!")
                 return
 
             # Обработка ставки и Вабанка
@@ -33,11 +33,11 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
                     bet = int(args[0])
                     if bet <= 0: raise ValueError
                 except ValueError:
-                    await message.answer("❌ Укажи корректную сумму ставки!")
+                    await message.answer("🙄 Укажи корректную сумму ставки!")
                     return
 
             if bet > user['credits']:
-                await message.answer(f"❌ Не хватает кредитов! Твой баланс: {user['credits']} 💰")
+                await message.answer(f"Главный бомж района? Тебе не хватает кредитов. Твой баланс: {user['credits']} 💰")
                 return
 
             # Списываем ставку только если баланс все еще достаточен.
@@ -51,7 +51,7 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
                 user_id,
             )
             if charged is None:
-                await message.answer("❌ Баланс изменился, попробуй еще раз.")
+                await message.answer("🥱 Баланс изменился, попробуй еще раз.")
                 return
 
         # 1. Отправляем анимацию ожидания
@@ -89,11 +89,11 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
         reels_str = f"[ {reels[0]} | {reels[1]} | {reels[2]} ]"
 
         if multiplier > 1:
-            res_text = f"🎉 <b>ЙООО, ДЖЕКПОТТТТ</b> Три в ряд!\nВыигрыш: <b>+{payout} 💰</b> (x{multiplier})"
+            res_text = f"🤑🤑🤑 <b>ЙООООООУ, У НАС ДЖЕКПОТТТТ!!!!</b> Три в ряд!\nВыигрыш: <b>+{payout} 💰</b> (x{multiplier})"
         elif multiplier == 1:
             res_text = f"♻️ <b>Две одинаковые!</b> Возврат ставки: <b>+{payout} 💰</b>"
         else:
-            res_text = f"💀 <b>ХАХА, МИМО!</b> Потеряно: <b>-{bet} 💰</b>"
+            res_text = f"💀 <b>ХАХАХАХА, ЛООХ!</b> Потеряно: <b>-{bet} 💰</b>"
 
         final_text = (
             f"🎰 <b>СЛОТЫ</b> | Игрок: {message.from_user.first_name}\n\n"
@@ -114,7 +114,7 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
 
         target = message.reply_to_message.from_user
         if target.id == user_id:
-            await message.answer("Нельзя играть в кубики с самим собой!")
+            await message.answer("😑 Еблан, нельзя играть в кубики с самим собой!")
             return
         args = message.text.split()[1:]
         if not args:
@@ -137,14 +137,14 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
                     bet = int(args[0])
                     if bet <= 0: raise ValueError
                 except ValueError:
-                    await message.answer("❌ Некорректная ставка!")
+                    await message.answer("🙄 Некорректная ставка!")
                     return
 
             if p1['credits'] < bet:
-                await message.answer("❌ У тебя недостаточно средств для такой ставки!")
+                await message.answer("😂 Нищеброд, у тебя недостаточно средств для такой ставки!")
                 return
             if p2['credits'] < bet:
-                await message.answer(f"❌ У @{target.username or target.first_name} недостаточно средств!")
+                await message.answer(f"🥶 У @{target.username or target.first_name} недостаточно средств, вот бедолага!")
                 return
 
         # Создаем кнопку вызова
@@ -207,17 +207,15 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
 
         await callback.message.answer(f"👤 <b>{name1}</b> бросает кубик...", parse_mode="HTML")
         dice1 = await callback.message.answer_dice(emoji="🎲")
-        await asyncio.sleep(3.5) # Ждем, пока проиграется анимация
+        await asyncio.sleep(3.5) 
 
         await callback.message.answer(f"👤 <b>{name2}</b> бросает кубик...", parse_mode="HTML")
         dice2 = await callback.message.answer_dice(emoji="🎲")
-        await asyncio.sleep(3.5) # Ждем, пока проиграется анимация
+        await asyncio.sleep(3.5) 
 
-        # Telegram сам генерирует результат внутри объекта dice
+        #генерирует результат внутри объекта dice
         r1 = dice1.dice.value
         r2 = dice2.dice.value
-
-        # --- ПОДВОДИМ ИТОГИ ---
 
         text = f"📊 <b>ИТОГИ ДУЭЛИ:</b>\n\n"
 
@@ -225,16 +223,16 @@ def register_casino_handlers(dp, *, db_pool_getter: Callable, bot, slot_symbols)
             if r1 > r2:
                 win_pot = bet * 2
                 await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", win_pot, p1_id)
-                text += f"🏆 Победитель: <b>{name1}</b>! Забирает банк <b>+{win_pot} 💰</b>"
+                text += f"🏆 Победитель: <b>{name1}</b>! Забирает весь банк <b>+{win_pot} 💰</b>"
             elif r2 > r1:
                 win_pot = bet * 2
                 await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", win_pot, p2_id)
-                text += f"🏆 Победитель: <b>{name2}</b>! Забирает банк <b>+{win_pot} 💰</b>"
+                text += f"🏆 Победитель: <b>{name2}</b>! Забирает весь банк <b>+{win_pot} 💰</b>"
             else:
-                # Ничья — возврат
+                # ничья — возврат
                 await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", bet, p1_id)
                 await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", bet, p2_id)
-                text += f"🤝 <b>Ничья!</b> Ставки возвращены игрокам."
+                text += f"🤝 <b>Ничья!</b> Вам повезло... Ставки возвращены игрокам."
 
         await callback.message.answer(text, parse_mode="HTML")
         await callback.answer()
