@@ -243,7 +243,7 @@ def register_moderation_handlers(
         text = f"📖 <b>Досье на {target_name}</b>\nТекущие варны: {warns}/4\n\n"
 
         if not logs:
-            text += "<i>Абсолютно чист. Это же ангел во плоти. 👼</i>"
+            text += "<i>Абсолютно чист. Неужто в нашем аду появился ангел?</i>"
         else:
             for log in logs:
                 dt = log['created_at'].strftime("%m-%d %H:%M")
