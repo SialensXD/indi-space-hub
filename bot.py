@@ -393,7 +393,12 @@ async def site_changelog(request: web.Request):
             LIMIT 50
             """
         )
-    return web.json_response({"entries": [dict(entry) for entry in entries]}, default=str)
+    payload = []
+    for entry in entries:
+        item = dict(entry)
+        item["published_at"] = item["published_at"].isoformat()
+        payload.append(item)
+    return web.json_response({"entries": payload})
  
         
 async def save_user_role(user_id: int, username: str, role_id: int):
