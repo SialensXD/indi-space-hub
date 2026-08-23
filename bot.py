@@ -19,6 +19,7 @@ from config import (
     WEBHOOK_SECRET,
     WEBHOOK_PATH,
     SITE_ORIGIN,
+    SITE_URL,
     webhook_url,
 )
 from domain import (
@@ -616,6 +617,7 @@ register_casino_handlers(
 async def setup_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="🚀 Проверка/список (ЛС онли)"),
+        BotCommand(command="link", description="🔗 Ссылка на сайт"),
         BotCommand(command="role", description="🎭 Выбрать/сменить персонажа"),
         BotCommand(command="profile", description="👤 Профиль, статы и рюкзак"),
         BotCommand(command="daily", description="🎁 Забрать ежедневную награду"),
@@ -749,6 +751,7 @@ register_user_handlers(
     start_time=START_TIME,
     trigger_cache=TRIGGERS_CACHE,
     active_duels=active_duels,
+    site_url=SITE_URL,
 )
 
 @dp.message(Command("duel"))

@@ -15,6 +15,7 @@ WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhook")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 SITE_ORIGIN = os.environ.get("SITE_ORIGIN", "https://sialensxd.github.io")
+SITE_URL = os.environ.get("SITE_URL", "https://sialensxd.github.io/indi-space-hub/")
 PORT = int(os.environ.get("PORT", "10000"))
 
 ADMIN_USERNAMES = {
