@@ -8,41 +8,63 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, refresh_shop_if_needed: Callable):
-    def get_shop_keyboard(category="items"):
+def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, refresh_shop_if_needed: Callable, user_in_active_duel: Callable):
+    async def get_shop_keyboard(category="items", owner_id=None):
+        if owner_id is None:
+            return None
+        async with db_pool_getter().acquire() as conn:
+            owned_items = await conn.fetch("SELECT item_id FROM inventory WHERE user_id = $1 AND count > 0", owner_id)
+            owned_titles = await conn.fetch("SELECT title_id FROM user_titles WHERE user_id = $1", owner_id)
+        owned_item_ids = {row["item_id"] for row in owned_items}
+        owned_title_ids = {row["title_id"] for row in owned_titles}
         builder = InlineKeyboardBuilder()
         if category == "items":
             for item in shop_data["items"]:
+                if item["id"] in owned_item_ids:
+                    continue
                 price = item["price"]
                 builder.button(
                     text=f"📦 {item['name']} ({price} 💰)",
-                    callback_data=f"buy_item_{item['id']}_{price}",
+                    callback_data=f"buy_item_{item['id']}_{owner_id}",
                 )
-            builder.button(text="➡️ Смотреть Титулы", callback_data="shop_tab_titles")
+            builder.button(text="➡️ Смотреть Титулы", callback_data=f"shop_tab_titles_{owner_id}")
         else:
             for title in shop_data["titles"]:
+                if title["id"] in owned_title_ids:
+                    continue
                 builder.button(
                     text=f"🏷 {title['name']} ({title['price']} 💰)",
-                    callback_data=f"buy_title_{title['id']}_{title['price']}",
+                    callback_data=f"buy_title_{title['id']}_{owner_id}",
                 )
-            builder.button(text="⬅️ Смотреть Предметы", callback_data="shop_tab_items")
+            builder.button(text="⬅️ Смотреть Предметы", callback_data=f"shop_tab_items_{owner_id}")
         builder.adjust(1)
         return builder.as_markup()
 
     @dp.message(Command("shop"))
     async def cmd_shop(message: types.Message):
+        if user_in_active_duel(message.from_user.id):
+            await message.answer("⚔️ Во время боя доступны только боевые действия.")
+            return
         await refresh_shop_if_needed()
         text = "🏪<b>Магазин (обнова каждые 4 часа):</b>\n\n<i>Раздел: 🎒 Предметы</i>"
-        await message.answer(text, reply_markup=get_shop_keyboard(), parse_mode="HTML")
+        await message.answer(text, reply_markup=await get_shop_keyboard(owner_id=message.from_user.id), parse_mode="HTML")
 
     @dp.callback_query(F.data.startswith("shop_tab_"))
     async def cb_shop_tab(callback: types.CallbackQuery):
-        tab = callback.data.split("_")[2]
+        parts = callback.data.split("_")
+        tab = parts[2]
+        owner_id = int(parts[3]) if len(parts) > 3 else None
+        if owner_id != callback.from_user.id:
+            await callback.answer("Этот магазин открыт для другого игрока.", show_alert=True)
+            return
+        if user_in_active_duel(callback.from_user.id):
+            await callback.answer("Во время боя магазин недоступен.", show_alert=True)
+            return
         await refresh_shop_if_needed()
         section_name = "🎒 Предметы" if tab == "items" else "🏷 Титулы"
         text = f"🏪 <b>Магазин (обнова каждые 4 часа):</b>\n\n<i>Раздел: {section_name}</i>"
         await callback.message.edit_text(
-            text, reply_markup=get_shop_keyboard(tab), parse_mode="HTML"
+            text, reply_markup=await get_shop_keyboard(tab, owner_id), parse_mode="HTML"
         )
         await callback.answer()
 
@@ -51,11 +73,41 @@ def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, ref
         parts = callback.data.split("_")
         buy_type = parts[1]
         item_id = int(parts[2])
-        price = int(parts[3])
+        owner_id = int(parts[3])
         user_id = callback.from_user.id
+        if owner_id != user_id:
+            await callback.answer("Эта покупка предназначена другому игроку.", show_alert=True)
+            return
+        if user_in_active_duel(user_id):
+            await callback.answer("Во время боя магазин недоступен.", show_alert=True)
+            return
 
         async with db_pool_getter().acquire() as conn:
             async with conn.transaction():
+                table = "items" if buy_type == "item" else "titles"
+                product = await conn.fetchrow(f"SELECT id, price FROM {table} WHERE id = $1", item_id)
+                if not product or product["id"] not in {entry["id"] for entry in shop_data["items" if buy_type == "item" else "titles"]}:
+                    await callback.answer("Этот товар уже недоступен в текущей витрине.", show_alert=True)
+                    return
+                price = product["price"]
+                if buy_type == "item":
+                    already_owned = await conn.fetchval(
+                        "SELECT 1 FROM inventory WHERE user_id = $1 AND item_id = $2 AND count > 0",
+                        user_id,
+                        item_id,
+                    )
+                    if already_owned:
+                        await callback.answer("Этот предмет уже есть у тебя и скрыт из магазина.", show_alert=True)
+                        return
+                elif buy_type == "title":
+                    already_owned = await conn.fetchval(
+                        "SELECT 1 FROM user_titles WHERE user_id = $1 AND title_id = $2",
+                        user_id,
+                        item_id,
+                    )
+                    if already_owned:
+                        await callback.answer("Этот титул уже есть у тебя и скрыт из магазина.", show_alert=True)
+                        return
                 charged = await conn.fetchval(
                     """
                     UPDATE users SET credits = credits - $1
@@ -82,14 +134,6 @@ def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, ref
                     )
                     await callback.answer("✅ Предмет куплен и брошен в рюкзак!", show_alert=True)
                 elif buy_type == "title":
-                    exists = await conn.fetchval(
-                        "SELECT 1 FROM user_titles WHERE user_id = $1 AND title_id = $2",
-                        user_id,
-                        item_id,
-                    )
-                    if exists:
-                        await callback.answer("⚠️ У тебя уже есть этот титул!", show_alert=True)
-                        return
                     await conn.execute(
                         "INSERT INTO user_titles (user_id, title_id) VALUES ($1, $2)",
                         user_id,
@@ -114,7 +158,7 @@ def register_shop_handlers(dp, *, db_pool_getter: Callable, shop_data: dict, ref
         else:
             new_text = current_html + f"\n\n<i>{user_name} только что что-то купил...</i>"
         await callback.message.edit_text(
-            new_text, reply_markup=callback.message.reply_markup, parse_mode="HTML"
+            new_text, reply_markup=await get_shop_keyboard("titles" if buy_type == "title" else "items", user_id), parse_mode="HTML"
         )
 
     return get_shop_keyboard
