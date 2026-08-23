@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Indie Space - лучший чат</title>
+  <title>Ultra Space - лучший флуд</title>
   <meta name="site-api-url" content="https://indi-space-hub.onrender.com">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -19,7 +19,7 @@
   </div>
   <main class="shell">
     <section id="welcome-screen" class="screen screen-welcome">
-      <p class="eyebrow">INDIE SPACE HUB</p>
+      <p class="eyebrow">ULTRA SPACE HUB</p>
       <h1>Добро пожаловать на наш сайт!</h1>
       <p class="lead">Здесь можно найти информацию информацию о персонажах, посмотреть топ и даже увидеть последние новости!</p>
       <button class="button button-primary" id="begin-button" type="button">Представиться</button>
@@ -29,8 +29,10 @@
     <section id="application-screen" class="screen is-hidden">
       <p class="eyebrow">STEP 01 /// REQUEST</p>
       <h2>А ты вообще человек?</h2>
-      <p class="muted">Введи свой юз без @. Заявка сразу попадет владельцу.</p>
+      <p class="muted">Укажи роль и свой юз без @. Заявка сразу попадет владельцу.</p>
       <form id="application-form">
+        <label for="role">Роль</label>
+        <input class="role-input" id="role" name="role" type="text" minlength="2" maxlength="80" autocomplete="organization-title" placeholder="например: V1, Минос, Сизиф" required>
         <label for="username">Telegram username</label>
         <div class="input-row">
           <span>@</span>
@@ -43,7 +45,7 @@
 
     <section id="pending-screen" class="screen is-hidden">
       <p class="eyebrow">STEP 02 /// REVIEW</p>
-      <h2>Заявка уже у владельца</h2>
+      <h2>Заявка уже у владельца, скоро тебе напишут!</h2>
       <p class="lead">Оставь эту вкладку открытой. Статус обновится, когда решение будет принято в Telegram.</p>
       <div class="status-line"><span class="pulse"></span><span>Ожидаем решение</span></div>
     </section>
@@ -110,7 +112,7 @@
           </article>
           <article class="rule-group">
             <h4>2. Токсичность и конфликты</h4>
-            <div class="rule"><strong>2.1. Переход на личности</strong><p>Оскорбления не в шутку, беспочвенные наезды и провокации участников к агрессии запрещены. Критикуйте мнение, а не человека.</p><p class="penalty">Наказание: мут от 2 до 6 часов, зависит от жесткости.</p></div>
+            <div class="rule"><strong>2.1. Переход на личности</strong><p>Несмешные оскорбления, беспочвенные наезды и провокации участников к агрессии запрещены. Критикуйте мнение, а не человека.</p><p class="penalty">Наказание: мут от 2 до 6 часов, зависит от жесткости.</p></div>
           </article>
           <article class="rule-group">
             <h4>3. Серьезные косяки</h4>

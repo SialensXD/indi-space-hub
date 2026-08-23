@@ -45,7 +45,7 @@ body::after {
   top: 22px;
   right: 30px;
   color: #e0a7ff;
-  content: 'LAYER 2 // LUST ONLINE';
+  content: 'Сиаленс все видит...';
   font: 600 11px var(--mono);
   letter-spacing: 2px;
 }
@@ -143,6 +143,7 @@ label { display: block; margin: 38px 0 12px; color: var(--gray); font: 600 13px 
 .input-row span { color: var(--red); font: 22px var(--mono); }
 input { min-width: 0; flex: 1; padding: 14px 9px; border: 0; outline: 0; color: var(--white); background: transparent; font: 20px var(--mono); }
 input::placeholder { color: #555; }
+.role-input { width: 100%; border: 1px solid var(--line); border-bottom: 2px solid var(--red); padding: 14px 12px; box-shadow: 0 8px 24px rgba(189, 56, 255, .08); }
 .form-message { min-height: 22px; margin: 16px 0 0; color: var(--gray); font-size: 14px; }
 .form-message.error { color: #ff777c; }
 

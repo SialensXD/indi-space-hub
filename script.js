@@ -141,13 +141,14 @@ document.querySelector("#application-form").addEventListener("submit", async (ev
   event.preventDefault();
   const button = event.currentTarget.querySelector("button");
   const username = document.querySelector("#username").value.trim().replace(/^@/, "");
+  const role = document.querySelector("#role").value.trim();
   button.disabled = true;
   showFormMessage("Отправляем заявку...");
   try {
     const response = await fetch(apiPath("/api/apply"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username }),
+      body: JSON.stringify({ username, role }),
     });
     const data = await readJson(response);
     localStorage.setItem(applicationKey, data.token);

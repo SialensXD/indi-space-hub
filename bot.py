@@ -5,6 +5,7 @@ import logging
 import asyncio
 import asyncpg
 import secrets
+from html import escape
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -175,6 +176,7 @@ async def init_db():
                 CREATE TABLE IF NOT EXISTS site_applications (
                     token TEXT PRIMARY KEY,
                     username TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'Не указана',
                     user_id BIGINT,
                     status TEXT NOT NULL DEFAULT 'pending',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -220,6 +222,7 @@ async def init_db():
                 ALTER TABLE mod_logs ADD COLUMN IF NOT EXISTS action TEXT;
                 ALTER TABLE mod_logs ADD COLUMN IF NOT EXISTS reason TEXT;
                 ALTER TABLE mod_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+                ALTER TABLE site_applications ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'Не указана';
 
                 CREATE UNIQUE INDEX IF NOT EXISTS users_user_id_unique ON users (user_id);
             """)
@@ -297,7 +300,7 @@ def application_keyboard(token: str):
     return builder.as_markup()
 
 
-async def create_site_application(username: str):
+async def create_site_application(username: str, role: str):
     clean_username = normalize_username(username)
     token = secrets.token_urlsafe(12)
     async with db_pool.acquire() as conn:
@@ -307,11 +310,12 @@ async def create_site_application(username: str):
         )
         await conn.execute(
             """
-            INSERT INTO site_applications (token, username, user_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO site_applications (token, username, role, user_id)
+            VALUES ($1, $2, $3, $4)
             """,
             token,
             clean_username,
+            role,
             user_id,
         )
     return token, user_id
@@ -324,10 +328,16 @@ async def site_application(request: web.Request):
         return web.json_response({"error": "Некорректный JSON"}, status=400)
 
     username = str(payload.get("username", ""))
+    role = str(payload.get("role", "")).strip()
     clean_username = normalize_username(username)
     if not re.fullmatch(r"[a-zA-Z0-9_]{5,32}", clean_username):
         return web.json_response(
             {"error": "Укажи корректный юз без пробелов."},
+            status=400,
+        )
+    if not 2 <= len(role) <= 80:
+        return web.json_response(
+            {"error": "Укажи роль участника длиной от 2 до 80 символов."},
             status=400,
         )
 
@@ -343,10 +353,11 @@ async def site_application(request: web.Request):
     if existing:
         return web.json_response({"token": existing["token"], "status": existing["status"]})
 
-    token, user_id = await create_site_application(clean_username)
+    token, user_id = await create_site_application(clean_username, role)
     text = (
         "🌐 <b>Новая заявка на сайт</b>\n\n"
         f"Username: <b>@{clean_username}</b>\n"
+        f"Роль: <b>{escape(role)}</b>\n"
         f"ID в базе: <code>{user_id or 'не найден'}</code>\n\n"
         "Привет, я из будущего, снова выбираешь, кого пускать на сайт?"
     )
@@ -883,7 +894,7 @@ async def decide_site_application(callback: types.CallbackQuery, status: str):
             UPDATE site_applications
             SET status = $1, decided_at = NOW()
             WHERE token = $2 AND status = 'pending'
-            RETURNING username, user_id
+            RETURNING username, role, user_id
             """,
             status,
             token,
@@ -896,7 +907,7 @@ async def decide_site_application(callback: types.CallbackQuery, status: str):
     approved = status == "approved"
     decision_text = "✅ ВПУЩЕН" if approved else "❌ ОТКЛОНЕН"
     await callback.message.edit_text(
-        f"🌐 Заявка @{application['username']} — <b>{decision_text}</b>",
+        f"🌐 Заявка @{application['username']} ({escape(application['role'] or 'Не указана')}) — <b>{decision_text}</b>",
         parse_mode="HTML",
     )
     if application["user_id"]:
