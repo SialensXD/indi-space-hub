@@ -15,6 +15,7 @@ def register_user_handlers(
     start_time: datetime,
     trigger_cache: dict,
     active_duels: dict,
+    site_url: str,
 ):
     @dp.message(Command("start"))
     async def cmd_start(message: types.Message):
@@ -40,6 +41,7 @@ def register_user_handlers(
                 "🏪 <b>/shop</b> — заглянуть в магазин товаров и титулов, там обнова каждые 4 часа\n"
                 "👤 <b>/profile</b> — посмотреть свою статистику\n"
                 "📊 <b>/top</b> — глянуть лидеров чата по разным штукам\n\n"
+                "🔗 <b>/link</b> — получить ссылку на сайт\n\n"
                 "А в чате ответь командой <code>/duel</code> на сообщение соперника, чтобы вызвать его на бой"
             )
         else:
@@ -48,6 +50,10 @@ def register_user_handlers(
                 "Нужны команды? тогда бегом ко мне в ЛС и там пропиши <code>/start</code>."
             )
         await message.answer(text, parse_mode="HTML")
+
+    @dp.message(Command("link"))
+    async def cmd_link(message: types.Message):
+        await message.answer(f"Вот ссылка на сайт: {site_url}")
 
     @dp.message(Command("status", "ping"))
     async def cmd_status(message: types.Message):
