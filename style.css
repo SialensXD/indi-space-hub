@@ -176,11 +176,14 @@ tr:hover td { color: var(--white); background: rgba(189, 56, 255, .08); }
 .role-card.is-open .role-hint { display: none; }
 .role-details { display: none; }
 .role-card.is-open .role-details { display: block; animation: role-details-in .35s .08s both; }
+.role-stats { display: flex; gap: 10px; margin: 22px 0 24px; }
+.role-stats span { flex: 1; padding: 12px 14px; border-left: 2px solid var(--red); background: rgba(189, 56, 255, .1); color: var(--white); font: 700 17px var(--mono); }
+.role-stats b { display: block; margin-bottom: 4px; color: var(--gray); font-size: 10px; letter-spacing: 1px; }
 .role-details p { color: #d9cce4; font-size: 16px; line-height: 1.7; }
 .role-details .role-ability { color: #e0a7ff; }
 .role-close { margin-top: 18px; border: 1px solid var(--line); padding: 12px 16px; color: var(--white); background: transparent; font: 600 13px var(--mono); text-transform: uppercase; cursor: pointer; transition: border-color .2s, color .2s, background .2s; }
 .role-close:hover, .role-close:focus-visible { border-color: var(--red); color: #12091a; background: var(--red); outline: 0; }
-.roles-backdrop { position: fixed; inset: 0; z-index: 4; visibility: hidden; background: rgba(2, 1, 5, .78); opacity: 0; backdrop-filter: blur(5px); transition: opacity .3s, visibility .3s; }
+.roles-backdrop { position: fixed; inset: 0; z-index: 1; visibility: hidden; background: rgba(2, 1, 5, .78); opacity: 0; backdrop-filter: blur(5px); transition: opacity .3s, visibility .3s; }
 .roles-backdrop.is-visible { visibility: visible; opacity: 1; }
 .role-icon { margin-bottom: 25px; color: var(--red); font: 700 28px var(--mono); }
 @keyframes role-open { from { opacity: 0; transform: translate(-50%, -47%) scale(.94); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
@@ -225,6 +228,7 @@ tr:hover td { color: var(--white); background: rgba(189, 56, 255, .08); }
   .info-head { align-items: start; flex-direction: column; }
   .info-tabs { margin-inline: -22px; padding-inline: 16px; }
   .roles-grid { grid-template-columns: 1fr; }
+  .role-stats { flex-direction: column; }
   .news-ticker { height: 420px; }
   .news-item { grid-template-columns: 1fr; gap: 8px; min-width: 270px; }
 }
