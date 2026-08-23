@@ -58,6 +58,13 @@ import uuid
 
 active_chests = set() 
 
+
+def user_in_active_duel(user_id: int) -> bool:
+    return any(
+        user_id in (duel['p1']['id'], duel['p2']['id'])
+        for duel in active_duels.values()
+    )
+
 #кэш триггеров в ОЗУ
 TRIGGERS_CACHE = {}
 
@@ -102,6 +109,21 @@ class AntiTheftMiddleware(BaseMiddleware):
             return #прерываем цепочку, команды не выполнятся
             
         #для callback-кнопок и прочего просто пропускаем дальше
+        return await handler(event, data)
+
+
+class CombatLockMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user_id = getattr(getattr(event, "from_user", None), "id", None)
+        if user_id is not None and user_in_active_duel(user_id):
+            if isinstance(event, Message):
+                await event.answer("⚔️ Во время боя доступны только боевые действия.")
+                return
+            if isinstance(event, types.CallbackQuery):
+                callback_data = event.data or ""
+                if not (callback_data.startswith("fight_") or callback_data.startswith("useitem_")):
+                    await event.answer("⚔️ Во время боя доступны только боевые действия.", show_alert=True)
+                    return
         return await handler(event, data)
 
 #бд (POSTGRESQL)
@@ -181,6 +203,10 @@ async def init_db():
                     status TEXT NOT NULL DEFAULT 'pending',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     decided_at TIMESTAMPTZ
+                );
+                CREATE TABLE IF NOT EXISTS site_application_rate_limits (
+                    client_ip TEXT PRIMARY KEY,
+                    last_submitted_at TIMESTAMPTZ NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS changelog_entries (
                     id BIGSERIAL PRIMARY KEY,
@@ -292,6 +318,43 @@ def normalize_username(value: str) -> str:
     return value.strip().lstrip("@").lower()
 
 
+def get_client_ip(request: web.Request) -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.remote or "unknown"
+
+
+async def reserve_application_ip(client_ip: str) -> int | None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=30)
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            last_submitted_at = await conn.fetchval(
+                """
+                SELECT last_submitted_at
+                FROM site_application_rate_limits
+                WHERE client_ip = $1
+                FOR UPDATE
+                """,
+                client_ip,
+            )
+            if last_submitted_at and last_submitted_at > cutoff:
+                return max(1, int((last_submitted_at - cutoff).total_seconds()))
+
+            await conn.execute(
+                """
+                INSERT INTO site_application_rate_limits (client_ip, last_submitted_at)
+                VALUES ($1, $2)
+                ON CONFLICT (client_ip) DO UPDATE
+                SET last_submitted_at = EXCLUDED.last_submitted_at
+                """,
+                client_ip,
+                now,
+            )
+    return None
+
+
 def application_keyboard(token: str):
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Впустить", callback_data=f"site_approve_{token}")
@@ -339,6 +402,14 @@ async def site_application(request: web.Request):
         return web.json_response(
             {"error": "Укажи роль участника длиной от 2 до 80 символов."},
             status=400,
+        )
+
+    retry_after = await reserve_application_ip(get_client_ip(request))
+    if retry_after is not None:
+        return web.json_response(
+            {"error": "Ты уже отправлял заявку. Попробуй через 30 минут."},
+            status=429,
+            headers={"Retry-After": str(retry_after)},
         )
 
     async with db_pool.acquire() as conn:
@@ -448,7 +519,7 @@ async def get_roles_keyboard(current_user_id: int):
         else:
             btn_text = f"✨ (Свободно) {role['name']}"
             
-        builder.button(text=btn_text, callback_data=f"role_{role['id']}")
+        builder.button(text=btn_text, callback_data=f"role_{role['id']}_{current_user_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -464,12 +535,10 @@ def render_duel_text(duel_id: str):
         
     text = f"⚔️ <b>Ого, да тут битва как в аниме</b> ⚔️\n\n"
     text += f"🎮 <b>{p1['name']}</b> [{p1['role']}]\n"
-    p1_resource = f" | Души: {p1['souls']}" if p1['type'] == 'souls' else ""
-    text += f"HP: {p1['hp']}/{p1['max_hp']}{p1_resource} {make_hp_bar(p1['hp'], p1['max_hp'])}\n\n"
+    text += f"HP: {p1['hp']}/{p1['max_hp']} {make_hp_bar(p1['hp'], p1['max_hp'])}\n\n"
     
     text += f"🎮 <b>{p2['name']}</b> [{p2['role']}]\n"
-    p2_resource = f" | Души: {p2['souls']}" if p2['type'] == 'souls' else ""
-    text += f"HP: {p2['hp']}/{p2['max_hp']}{p2_resource} {make_hp_bar(p2['hp'], p2['max_hp'])}\n\n"
+    text += f"HP: {p2['hp']}/{p2['max_hp']} {make_hp_bar(p2['hp'], p2['max_hp'])}\n\n"
     
     text += f"📜 <b>Лог:</b> {duel['log']}\n\n"
     
@@ -487,25 +556,10 @@ def get_duel_keyboard(duel_id: str):
     return builder.as_markup()
 
 
-def get_souls_keyboard(duel_id: str):
-    builder = InlineKeyboardBuilder()
-    builder.button(text="💚 Хил за 2 души", callback_data=f"souls_heal_{duel_id}")
-    builder.button(text="🎯 Выстрел за 3 души", callback_data=f"souls_shot_{duel_id}")
-    builder.button(text="🔙 Назад", callback_data=f"souls_back_{duel_id}")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 async def finish_duel_action(callback, duel_id, attacker, defender, *, pass_turn=True, answer_text=None):
     duel = active_duels[duel_id]
 
     if defender['hp'] <= 0 or attacker['hp'] <= 0:
-        for player in (attacker, defender):
-            if player['hp'] <= 0 and player.get('revive_once') and not player['revived']:
-                player['hp'] = max(1, int(player['max_hp'] * 0.4))
-                player['revived'] = True
-                duel['log'] = "🔆 Игрок помогает Нико, файл сохранения загружен!"
-
         if attacker['hp'] <= 0 or defender['hp'] <= 0:
             defender['hp'], attacker['hp'] = max(0, defender['hp']), max(0, attacker['hp'])
             winner = attacker if defender['hp'] <= 0 else defender
@@ -579,10 +633,14 @@ get_shop_keyboard = register_shop_handlers(
     db_pool_getter=get_db_pool,
     shop_data=shop_data,
     refresh_shop_if_needed=refresh_shop_if_needed,
+    user_in_active_duel=user_in_active_duel,
 )
 
 @dp.message(Command("role"))
 async def cmd_role(message: types.Message):
+    if user_in_active_duel(message.from_user.id):
+        await message.answer("⚔️ Во время боя доступны только боевые действия.")
+        return
     kb = await get_roles_keyboard(message.from_user.id)
     await message.answer("Выбери персонажа:", reply_markup=kb)
 
@@ -935,7 +993,15 @@ async def cb_site_reject(callback: types.CallbackQuery):
 async def callbacks_num(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     username = callback.from_user.username or ""
-    role_id = int(callback.data.split("_")[1])
+    parts = callback.data.split("_")
+    role_id = int(parts[1])
+    owner_id = int(parts[2]) if len(parts) > 2 else None
+    if owner_id != user_id:
+        await callback.answer("Это меню выбора роли открыто для другого игрока.", show_alert=True)
+        return
+    if user_in_active_duel(user_id):
+        await callback.answer("Во время боя роль менять нельзя.", show_alert=True)
+        return
     is_admin = username.lower() in [a.lower() for a in ADMIN_USERNAMES]
 
     #роль бога
@@ -1025,8 +1091,8 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         turn_id = random.choice([p1_id, p2_id])
         
         active_duels[duel_id] = {
-            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False, "souls": 0, "item_used": False, "revive_once": c1.get('revive_once', False), "revived": False},
-            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "blind": False, "niko_dodge": False, "souls": 0, "item_used": False, "revive_once": c2.get('revive_once', False), "revived": False},
+            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
             "turn": turn_id,
             "turn_count": 0,
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
@@ -1085,21 +1151,15 @@ async def cb_fight(callback: types.CallbackQuery):
             else:
                 dmg = max(0, attacker['atk'] + random.randint(0, 0))
                 
-                if attacker['type'] == 'enrage' and attacker['hp'] <= (attacker['max_hp'] / 3):
+                if attacker['type'] == 'v2' and attacker['hp'] <= (attacker['max_hp'] / 3):
                     dmg += 12
                     log_msg = f"💢 V2 В ЯРОСТИ! "
                 
-                miss_chance = 0.20 if attacker['type'] == 'berserk' else 0.0
-                if attacker['blind']: miss_chance += 0.25
+                miss_chance = 0.20 if attacker['type'] == 'minos' else 0.0
                 
                 if random.random() < miss_chance:
                     dmg = 0
                     log_msg = f"💨ХАХА! {attacker['name']} промахивается по противнику!"
-                elif (defender['type'] == 'karma' and random.random() < 0.93) or (defender['niko_dodge'] and random.random() < 0.60):
-                    defender['niko_dodge'] = False 
-                    dmg = 0
-                    log_msg = f"💨ХАХА! {defender['name']} увернулся от атаки!"
-                
                 # парирование в1 и фмкс гифки
                 elif defender['parry']:
                     defender['parry'] = False 
@@ -1108,7 +1168,7 @@ async def cb_fight(callback: types.CallbackQuery):
                         attacker['hp'] -= reflected_dmg 
                         dmg = 0 
                         log_msg = f"💥 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно!"
-                        turn_gif = SKILL_GIFS.get("vampire") # гифка для парирования
+                        turn_gif = SKILL_GIFS.get("v1") # гифка для парирования
                 
                 if dmg > 0:
                     if defender['block']:
@@ -1118,17 +1178,7 @@ async def cb_fight(callback: types.CallbackQuery):
                     defender['hp'] -= dmg
                     log_msg += f"👊 {attacker['name']} наносит {dmg} урона!"
 
-                    if attacker['type'] == 'souls':
-                        attacker['souls'] += 1
-                        log_msg += f" 🌀 Души: {attacker['souls']}"
-                    
-                    if attacker['type'] == 'karma':
-                        
-                        karma_dmg = max(1, int(defender['max_hp'] * 0.07))
-                        defender['hp'] -= karma_dmg
-                        log_msg += f" ☠️ Карма сжигает {karma_dmg} HP!"
-                    
-                    if attacker['type'] == 'vampire':
+                    if attacker['type'] == 'v1':
                         heal = max(1, int(dmg * 0.4))
                         attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
                         log_msg += f" 🩸 Отхил: +{heal} HP!"
@@ -1144,68 +1194,34 @@ async def cb_fight(callback: types.CallbackQuery):
             
             r_type = attacker['type'] 
             
-            # гиф навыков (кроме в1)
-            if r_type != "vampire":
+            # V1 готовит парирование вместо отдельной анимации навыка.
+            if r_type != "v1":
                 turn_gif = SKILL_GIFS.get(r_type)
             
-            is_karma_dodge = (defender['type'] == 'karma' and random.random() < 0.93)
-
             if r_type == "god": 
                 attacker['cd'] = 0
                 dmg = int(defender['max_hp'] * 0.99)
                 defender['hp'] -= dmg
                 log_msg = f"😏 <b>{attacker['name']}</b> начал заигрывать с <b>{defender['name']}</b> и у него случился моральный распад. Нанесено {dmg} морального урона!"
                     
-            elif r_type == "berserk":
+            elif r_type == "minos":
                 attacker['cd'] = 3
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «ЖАААЖМЕНТ!», но промахивается!"
-                elif is_karma_dodge:
-                    log_msg = f"💨ЙО! {defender['name']} увернулся от Жажмента"
                 else:
                     defender['hp'] -= 45
                     log_msg = f"⚖️ {attacker['name']} обрушивает «ЖАААЖМЕНТ!», Нанесено 45 урона!"
                     
-            elif r_type == "enrage": 
+            elif r_type == "v2":
                 attacker['cd'] = 3
-                if is_karma_dodge:
-                    log_msg = f"💨ВОУ! {defender['name']} увернулся от Кнаклбластера!"
-                else:
-                    defender['stun'] = True
-                    defender['hp'] -= 20
-                    log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 20 урона! {defender['name']} решил поспать."
+                defender['stun'] = True
+                defender['hp'] -= 20
+                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 20 урона! {defender['name']} решил поспать."
                     
-            elif r_type == "vampire": 
+            elif r_type == "v1": 
                 attacker['cd'] = 3
                 attacker['parry'] = True
                 log_msg = f"😈 {attacker['name']} готовится парировать следующую атаку!"
-                
-            elif r_type == "karma": 
-                attacker['cd'] = 3
-                defender['blind'] = True
-                log_msg = f"💫 {attacker['name']} снижает точность {defender['name']}!"
-                    
-            elif r_type == "light": 
-                attacker['cd'] = 1
-                attacker['niko_dodge'] = True
-                async with db_pool.acquire() as conn:
-                    inv = await conn.fetch(
-                        "SELECT i.id, i.name, inv.count FROM inventory inv JOIN items i ON inv.item_id = i.id WHERE inv.user_id = $1 AND inv.count > 0",
-                        attacker['id']
-                    )
-                if inv and not attacker['item_used']:
-                    builder = InlineKeyboardBuilder()
-                    for item in inv:
-                        builder.button(text=f"🧧 {item['name']} ({item['count']} шт)", callback_data=f"useitem_{duel_id}_{item['id']}_light")
-                    builder.button(text="🔙 Отмена", callback_data=f"fight_back_{duel_id}")
-                    builder.adjust(1)
-                    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-                    return
-                log_msg = f"💡 {attacker['name']} готовится увернуться, но в рюкзаке нет предмета."
-                
-            elif r_type == "souls": 
-                await callback.message.edit_reply_markup(reply_markup=get_souls_keyboard(duel_id))
-                return
             else:
                 log_msg = f"У {attacker['name']} нет особых навыков. Ну и лох XD"
             
@@ -1256,48 +1272,10 @@ async def cb_fight_back(callback: types.CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=kb)
 
 
-@dp.callback_query(F.data.startswith("souls_back_"))
-async def cb_souls_back(callback: types.CallbackQuery):
-    duel_id = callback.data.split("_")[2]
-    if duel_id in active_duels:
-        await callback.message.edit_reply_markup(reply_markup=get_duel_keyboard(duel_id))
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("souls_heal_") | F.data.startswith("souls_shot_"))
-async def cb_souls_action(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    action, duel_id = parts[1], parts[2]
-    if duel_id not in active_duels:
-        await callback.answer("Этот бой уже завершен.", show_alert=True)
-        return
-    duel = active_duels[duel_id]
-    if duel['turn'] != callback.from_user.id:
-        await callback.answer("⏳ Не твой ход!", show_alert=True)
-        return
-    attacker = duel['p1'] if duel['p1']['id'] == callback.from_user.id else duel['p2']
-    defender = duel['p2'] if attacker is duel['p1'] else duel['p1']
-    cost = 2 if action == "heal" else 3
-    if attacker['type'] != 'souls' or attacker['souls'] < cost:
-        await callback.answer(f"Нужно {cost} души.", show_alert=True)
-        return
-
-    attacker['souls'] -= cost
-    attacker['cd'] = 2
-    if action == "heal":
-        heal = int(attacker['max_hp'] * 0.25)
-        attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
-        duel['log'] = f"🌀 {attacker['name']} тратит 2 души и восстанавливает {heal} HP!"
-    else:
-        defender['hp'] -= 35
-        duel['log'] = f"🎯 {attacker['name']} тратит 3 души и выпускает выстрел на 35 урона!"
-    await finish_duel_action(callback, duel_id, attacker, defender, answer_text="Спец атака использована!")
-
 @dp.callback_query(F.data.startswith("useitem_"))
 async def cb_use_item(callback: types.CallbackQuery):
     parts = callback.data.split("_")
     duel_id, item_id = parts[1], int(parts[2])
-    is_light_skill = len(parts) > 3 and parts[3] == "light"
     user_id = callback.from_user.id
     
     if duel_id not in active_duels:
@@ -1340,8 +1318,6 @@ async def cb_use_item(callback: types.CallbackQuery):
     elif e_type == 'buff':
         attacker['atk'] += e_val
         duel['log'] = f"💉 {attacker['name']} вкалывает себе в сонную артерию {item['name']}. Атака повышена на {e_val}!"
-    if is_light_skill:
-        duel['log'] = f"💡 {attacker['name']} увернулся и использовал {item['name']}!\n{duel['log']}"
     attacker['item_used'] = True
     await finish_duel_action(callback, duel_id, attacker, defender, pass_turn=False, answer_text="Предмет использован!")
 
@@ -1468,6 +1444,8 @@ def main():
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     dp.message.middleware(AntiTheftMiddleware())
+    dp.message.middleware(CombatLockMiddleware())
+    dp.callback_query.middleware(CombatLockMiddleware())
     app = web.Application(middlewares=[cors_middleware])
     app.router.add_get('/', site_index)
     app.router.add_get('/health', health_check)

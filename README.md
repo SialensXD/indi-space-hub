@@ -42,6 +42,8 @@
 4. Таблица топа загружается из `users` по `msg_count`, `xp` и `wins`.
 5. Чейнджлог загружается из таблицы `changelog_entries` в Supabase через `/api/changelog`.
 
+Для защиты от спама корректные заявки ограничены: не более одной заявки с одного IP за 30 минут. В production IP берется из `X-Forwarded-For`, который должен добавляться доверенным reverse proxy.
+
 Персонажи и чейнджлог редактируются вручную в `index.html`. Ссылка на чат также находится там. Username сам по себе не доказывает личность пользователя, поэтому для строгой идентификации позже можно добавить Telegram Login Widget или deep link `/start`.
 
 Если frontend опубликован на GitHub Pages, укажи публичный адрес Render-сервиса с ботом в `meta[name="site-api-url"]` внутри `index.html`. Например: `https://your-bot.onrender.com`. В Render добавь переменную `SITE_ORIGIN=https://sialensxd.github.io`. Без этого GitHub Pages возвращает свою HTML-страницу вместо JSON API.
