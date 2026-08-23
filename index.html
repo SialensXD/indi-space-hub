@@ -86,11 +86,21 @@
 
       <section class="info-section info-panel" id="panel-characters" role="tabpanel" aria-labelledby="tab-characters" hidden>
         <div class="section-heading"><span>02</span><h3>Боевые персонажи</h3></div>
-        <div class="roles-grid">
-          <article class="role-card"><div class="role-icon">[1]</div><h4>V1</h4><p>W.I.P.</p></article>
-          <article class="role-card"><div class="role-icon">[2]</div><h4>V2</h4><p>W.I.P.</p></article>
-          <article class="role-card"><div class="role-icon">[3]</div><h4>Minos</h4><p>W.I.P.</p></article>
+        <div class="roles-grid" id="roles-grid">
+          <article class="role-card" tabindex="0">
+            <div class="role-icon">[1]</div><h4>V1</h4><p class="role-hint">Нажми, чтобы посмотреть инфу о персе</p>
+            <div class="role-details"><p>Гоу про на ножках, который при нанесении урона восстанавливает здоровье, равное 40% от нанесенного урона.</p><p class="role-ability">Способность: парирование следующей атаки.</p><button class="role-close" type="button" aria-label="Свернуть информацию о V1">Свернуть</button></div>
+          </article>
+          <article class="role-card" tabindex="0">
+            <div class="role-icon">[2]</div><h4>V2</h4><p class="role-hint">Нажми, чтобы посмотреть инфу о персе</p>
+            <div class="role-details"><p>Улучшенная версия V1, созданная в мирное время. При потере 70% V2 впадает в ярость!</p><p class="role-ability">Способность: Кнаклбластер. Оглушает противника и наносит 20 урона.</p><button class="role-close" type="button" aria-label="Свернуть информацию о V2">Свернуть</button></div>
+          </article>
+          <article class="role-card" tabindex="0">
+            <div class="role-icon">[3]</div><h4>Minos</h4><p class="role-hint">Нажми, чтобы посмотреть инфу о персе</p>
+            <div class="role-details"><p>Бывший правитель вторго слоя, нынешняя прайм душа. Наносит коллосальный урон, но не всегда попадает.</p><p class="role-ability">Способность: "JUDGMENT!" наносит 45 урона, но может жирный шанс промахнуться.</p><button class="role-close" type="button" aria-label="Свернуть информацию о Minos">Свернуть</button></div>
+          </article>
         </div>
+        <div class="roles-backdrop" id="roles-backdrop" aria-hidden="true"></div>
       </section>
 
       <section class="info-section info-panel changelog" id="panel-changelog" role="tabpanel" aria-labelledby="tab-changelog" hidden>

@@ -135,6 +135,54 @@ document.querySelectorAll('[role="tab"]').forEach((tab, index, tabs) => {
   });
 });
 
+const rolesGrid = document.querySelector("#roles-grid");
+const rolesBackdrop = document.querySelector("#roles-backdrop");
+
+function closeRoleCard() {
+  const openCard = rolesGrid?.querySelector(".role-card.is-open");
+  if (!openCard) return;
+  openCard.classList.remove("is-open");
+  rolesGrid.classList.remove("has-open-card");
+  rolesBackdrop.classList.remove("is-visible");
+  rolesBackdrop.setAttribute("aria-hidden", "true");
+}
+
+function openRoleCard(card) {
+  const currentCard = rolesGrid.querySelector(".role-card.is-open");
+  if (currentCard === card) return;
+  currentCard?.classList.remove("is-open");
+  card.classList.add("is-open");
+  rolesGrid.classList.add("has-open-card");
+  rolesBackdrop.classList.add("is-visible");
+  rolesBackdrop.setAttribute("aria-hidden", "false");
+  card.querySelector(".role-close")?.focus();
+}
+
+rolesGrid?.addEventListener("click", (event) => {
+  const closeButton = event.target.closest(".role-close");
+  if (closeButton) {
+    event.stopPropagation();
+    closeRoleCard();
+    return;
+  }
+  const card = event.target.closest(".role-card");
+  if (card) openRoleCard(card);
+});
+
+rolesGrid?.addEventListener("keydown", (event) => {
+  const card = event.target.closest(".role-card");
+  if (!card || event.target.closest(".role-close")) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    openRoleCard(card);
+  }
+});
+
+rolesBackdrop?.addEventListener("click", closeRoleCard);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeRoleCard();
+});
+
 document.querySelector("#begin-button").addEventListener("click", () => showScreen("application"));
 document.querySelector("#retry-button").addEventListener("click", () => showScreen("application"));
 document.querySelector("#application-form").addEventListener("submit", async (event) => {
