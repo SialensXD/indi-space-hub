@@ -533,13 +533,26 @@ def render_duel_text(duel_id: str):
         percent = max(0, hp / max_hp)
         filled = int(percent * 10)
         return "🟩" * filled + "⬜️" * (10 - filled)
+
+    def make_rage_bar(player):
+        rage_percent = 100 if player['rage_turns'] else player['rage']
+        filled = int(rage_percent / 10)
+        bar = "🟥" * filled + "⬜️" * (10 - filled)
+        status = f" ({player['rage_turns']} хода)" if player['rage_turns'] else ""
+        return f"💢 Ярость: {bar}{status}"
         
     text = f"⚔️ <b>Ого, да тут битва как в аниме</b> ⚔️\n\n"
     text += f"🎮 <b>{p1['name']}</b> [{p1['role']}]\n"
-    text += f"HP: {p1['hp']}/{p1['max_hp']} {make_hp_bar(p1['hp'], p1['max_hp'])}\n\n"
+    text += f"HP: {p1['hp']}/{p1['max_hp']} {make_hp_bar(p1['hp'], p1['max_hp'])}"
+    if p1['type'] == 'v2':
+        text += f"\n{make_rage_bar(p1)}"
+    text += "\n\n"
     
     text += f"🎮 <b>{p2['name']}</b> [{p2['role']}]\n"
-    text += f"HP: {p2['hp']}/{p2['max_hp']} {make_hp_bar(p2['hp'], p2['max_hp'])}\n\n"
+    text += f"HP: {p2['hp']}/{p2['max_hp']} {make_hp_bar(p2['hp'], p2['max_hp'])}"
+    if p2['type'] == 'v2':
+        text += f"\n{make_rage_bar(p2)}"
+    text += "\n\n"
     
     text += f"📜 <b>Лог:</b> {duel['log']}\n\n"
     
@@ -1152,8 +1165,8 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         turn_id = random.choice([p1_id, p2_id])
         
         active_duels[duel_id] = {
-            "p1": {"id": p1_id, "name": p1_name, "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
-            "p2": {"id": p2_id, "name": p2_name, "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p1": {"id": p1_id, "name": p1_name, "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "rage": 0, "rage_turns": 0, "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p2": {"id": p2_id, "name": p2_name, "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "rage": 0, "rage_turns": 0, "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
             "turn": turn_id,
             "turn_count": 0,
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
@@ -1190,6 +1203,7 @@ async def cb_fight(callback: types.CallbackQuery):
         
     attacker = duel['p1'] if is_p1 else duel['p2']
     defender = duel['p2'] if is_p1 else duel['p1']
+    defender_hp_before = defender['hp']
     
     log_msg = ""
     attacker['block'] = False 
@@ -1212,9 +1226,8 @@ async def cb_fight(callback: types.CallbackQuery):
             else:
                 dmg = max(0, attacker['atk'] + random.randint(0, 0))
                 
-                if attacker['type'] == 'v2' and attacker['hp'] <= (attacker['max_hp'] / 3):
+                if attacker['type'] == 'v2' and attacker['rage_turns'] > 0:
                     dmg += 12
-                    log_msg = f"💢 V2 В ЯРОСТИ! "
                 
                 miss_chance = 0.20 if attacker['type'] == 'minos' else 0.0
                 
@@ -1230,6 +1243,9 @@ async def cb_fight(callback: types.CallbackQuery):
                         dmg = 0 
                         log_msg = f"💥 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно!"
                         turn_gif = SKILL_GIFS.get("v1") # гифка для парирования
+                        parry_heal = max(1, int(defender['max_hp'] * 0.2))
+                        defender['hp'] = min(defender['max_hp'], defender['hp'] + parry_heal)
+                        log_msg += f" 🩸 Восстановлено {parry_heal} HP!"
                 
                 if dmg > 0:
                     if defender['block']:
@@ -1240,9 +1256,10 @@ async def cb_fight(callback: types.CallbackQuery):
                     log_msg += f"👊 {attacker['name']} наносит {dmg} урона!"
 
                     if attacker['type'] == 'v1':
-                        heal = max(1, int(dmg * 0.4))
+                        heal_percent = random.randint(30, 50) / 100
+                        heal = max(1, int(dmg * heal_percent))
                         attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + heal)
-                        log_msg += f" 🩸 Отхил: +{heal} HP!"
+                        log_msg += f" 🩸 Отхил: +{heal} HP ({int(heal_percent * 100)}%)!"
                 
         elif action == "def":
             attacker['block'] = True
@@ -1276,8 +1293,9 @@ async def cb_fight(callback: types.CallbackQuery):
             elif r_type == "v2":
                 attacker['cd'] = 3
                 defender['stun'] = True
-                defender['hp'] -= 20
-                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на 20 урона! {defender['name']} решил поспать."
+                skill_damage = 20 + (12 if attacker['rage_turns'] > 0 else 0)
+                defender['hp'] -= skill_damage
+                log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на {skill_damage} урона! {defender['name']} решил поспать."
                     
             elif r_type == "v1": 
                 attacker['cd'] = 3
@@ -1321,6 +1339,18 @@ async def cb_fight(callback: types.CallbackQuery):
         attacker['cd'] -= 1
 
     duel['log'] = log_msg
+
+    damage_taken = max(0, defender_hp_before - defender['hp'])
+    if defender['type'] == 'v2' and damage_taken > 0 and defender['rage_turns'] == 0:
+        defender['rage'] = min(100, defender['rage'] + 25)
+        if defender['rage'] == 100:
+            defender['rage'] = 0
+            defender['rage_turns'] = 4
+    elif defender['type'] == 'v2' and damage_taken == 0 and defender['rage'] > 0 and defender['rage_turns'] == 0:
+        defender['rage'] = max(0, defender['rage'] - 25)
+
+    if attacker['type'] == 'v2' and attacker['rage_turns'] > 0:
+        attacker['rage_turns'] -= 1
     
     await finish_duel_action(callback, duel_id, attacker, defender, animation=turn_gif)
     
