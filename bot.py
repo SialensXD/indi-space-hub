@@ -1482,6 +1482,11 @@ async def track_messages(message: types.Message):
             await message.reply(reply_text, parse_mode="HTML")
             break
 
+
+@dp.message(F.animation)
+async def get_animation_file_id(message: types.Message):
+    await message.answer(f"ID GIF: <code>{message.animation.file_id}</code>", parse_mode="HTML")
+
 # Хендлер нажатия на сундук
 @dp.callback_query(F.data.startswith("chest_claim_"))
 async def cb_chest_claim(callback: types.CallbackQuery):
@@ -1510,10 +1515,6 @@ async def cb_chest_claim(callback: types.CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer(f"Ты получил {reward} кредитов!")
-
-@dp.message(F.animation)
-async def get_gif_id(message: Message):
-    await message.answer(f"ID вашей гифки:\n{message.animation.file_id}", parse_mode="MarkdownV2")
 
 #СЕРВЕр
 async def health_check(request):
