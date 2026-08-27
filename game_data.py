@@ -3,7 +3,7 @@
 CHARACTERS = {
     1: {"hp": 100, "max_hp": 100, "atk": 12, "type": "v1"},
     2: {"hp": 120, "max_hp": 120, "atk": 14, "type": "v2"},
-    3: {"hp": 140, "max_hp": 140, "atk": 20, "type": "minos"},
+    3: {"hp": 140, "max_hp": 140, "atk": 24, "type": "minos"},
     4: {"hp": 130, "max_hp": 130, "atk": 15, "type": "gabriel"},
     999: {"hp": 99999, "max_hp": 99999, "atk": 99999, "type": "god"},
 }
