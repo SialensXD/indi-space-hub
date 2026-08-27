@@ -40,7 +40,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, InputMediaAnimation
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
@@ -118,7 +118,8 @@ class CombatLockMiddleware(BaseMiddleware):
         user_id = getattr(getattr(event, "from_user", None), "id", None)
         if user_id is not None and user_in_active_duel(user_id):
             if isinstance(event, Message):
-                return
+                if not (event.text and event.text.startswith("/")):
+                    return
             if isinstance(event, types.CallbackQuery):
                 callback_data = event.data or ""
                 if not (callback_data.startswith("fight_") or callback_data.startswith("useitem_")):
@@ -556,6 +557,26 @@ def get_duel_keyboard(duel_id: str):
     return builder.as_markup()
 
 
+async def update_duel_message(message, text, reply_markup=None, animation=None):
+    if animation:
+        await message.edit_media(
+            media=InputMediaAnimation(
+                media=animation,
+                caption=text,
+                parse_mode="HTML",
+            ),
+            reply_markup=reply_markup,
+        )
+    elif message.animation:
+        await message.edit_caption(
+            caption=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    else:
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
 async def finish_duel_action(
     callback,
     duel_id,
@@ -585,15 +606,20 @@ async def finish_duel_action(
                 )
             del active_duels[duel_id]
             try:
-                await callback.message.delete()
+                await update_duel_message(callback.message, text, animation=animation)
             except Exception:
-                pass
-            await callback.message.answer(text, parse_mode="HTML")
-            if animation:
                 try:
-                    await callback.message.answer_animation(animation=animation)
+                    await callback.message.delete()
                 except Exception:
-                    logging.exception("Не удалось отправить GIF способности")
+                    pass
+                if animation:
+                    await callback.message.answer_animation(
+                        animation=animation,
+                        caption=text,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await callback.message.answer(text, parse_mode="HTML")
             await callback.answer(answer_text or "Ты выиграл.")
             return
 
@@ -605,18 +631,21 @@ async def finish_duel_action(
     text = render_duel_text(duel_id)
     kb = get_duel_keyboard(duel_id)
     try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await update_duel_message(callback.message, text, kb, animation=animation)
     except Exception:
         try:
             await callback.message.delete()
         except Exception:
             pass
-        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
-    if animation:
-        try:
-            await callback.message.answer_animation(animation=animation)
-        except Exception:
-            logging.exception("Не удалось отправить GIF способности")
+        if animation:
+            await callback.message.answer_animation(
+                animation=animation,
+                caption=text,
+                reply_markup=kb,
+                parse_mode="HTML",
+            )
+        else:
+            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer(answer_text or "")
 
 
@@ -645,6 +674,8 @@ async def setup_bot_commands(bot: Bot):
         BotCommand(command="duel", description="⚔️ Вызвать на дуэль (ответь на сообщение)"),
         BotCommand(command="top", description="📊 Топ чата"),
         BotCommand(command="title", description="👑 Управление титулами"),
+        BotCommand(command="status", description="🤖 Статус картера"),
+        BotCommand(command="triggers", description="🗣 Список триггеров"),
     ]
     await bot.set_my_commands(commands)
 
@@ -789,7 +820,7 @@ async def cmd_duel(message: types.Message):
             return
 
         target_id = message.reply_to_message.from_user.id
-        target_name = message.reply_to_message.from_user.first_name
+        target_name = escape(message.reply_to_message.from_user.first_name)
 
         if target_id == user_id:
             await message.answer("Ты не можешь вызвать сам себя на дуэль, шизофреник!")
@@ -808,9 +839,14 @@ async def cmd_duel(message: types.Message):
         builder.button(text="🛑 Отозвать", callback_data=f"duel_cancel_{user_id}")
         builder.adjust(2, 1)
 
+        duel_invites[(user_id, target_id)] = {
+            "initiator_name": escape(message.from_user.first_name),
+            "target_name": target_name,
+        }
+
         await message.answer(
             f"⚔️ <b>Вызов на дуэль!</b>\n\n"
-            f"@{message.from_user.username or message.from_user.first_name} вызывает {target_name} на дуэль!\n"
+            f"{escape(message.from_user.first_name)} вызывает {target_name} на дуэль!\n"
             f"Примешь вызов?",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
@@ -1108,12 +1144,16 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         c1 = CHARACTERS.get(p1_role_id, def_stats).copy()
         c2 = CHARACTERS.get(p2_role_id, def_stats).copy()
 
+        invite = duel_invites.pop((p1_id, p2_id), {})
+        p1_name = invite.get("initiator_name") or escape(p1_data['username'] or "Игрок 1")
+        p2_name = invite.get("target_name") or escape(callback.from_user.first_name or p2_data['username'] or "Игрок 2")
+
         duel_id = str(random.randint(10000, 99999))
         turn_id = random.choice([p1_id, p2_id])
         
         active_duels[duel_id] = {
-            "p1": {"id": p1_id, "name": p1_data['username'] or "Игрок 1", "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
-            "p2": {"id": p2_id, "name": p2_data['username'] or "Игрок 2", "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p1": {"id": p1_id, "name": p1_name, "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p2": {"id": p2_id, "name": p2_name, "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
             "turn": turn_id,
             "turn_count": 0,
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
