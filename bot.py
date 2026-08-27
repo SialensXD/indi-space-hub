@@ -29,7 +29,7 @@ from domain import (
     get_rank_title,
     parse_time,
 )
-from game_data import CHARACTERS, SKILL_GIFS, SLOT_SYMBOLS
+from game_data import CHARACTERS, GABRIEL_SKILL_GIFS, SKILL_GIFS, SLOT_SYMBOLS
 from handlers.shop import register_shop_handlers
 from handlers.moderation import register_moderation_handlers
 from handlers.user import register_user_handlers
@@ -40,7 +40,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram.types import BotCommand, InputMediaAnimation
+from aiogram.types import BotCommand
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
@@ -86,6 +86,17 @@ shop_refresh_task = None
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message
+
+GABRIEL_TAUNTS = (
+    "A mere object.",
+    "Not. Even. Mortal.",
+    "You are less than nothing.",
+)
+GABRIEL_RAGE_QUOTES = (
+    "I'LL SHOW YOU DIVINE JUSTICE!",
+    "TIME TO RIGHT MY WRONG!",
+    "LET'S SETTLE THIS!",
+)
 
 # ID моего чата (или нескольких чатов)
 class AntiTheftMiddleware(BaseMiddleware):
@@ -546,12 +557,16 @@ def render_duel_text(duel_id: str):
     text += f"HP: {p1['hp']}/{p1['max_hp']} {make_hp_bar(p1['hp'], p1['max_hp'])}"
     if p1['type'] == 'v2':
         text += f"\n{make_rage_bar(p1)}"
+    if p1['type'] == 'gabriel' and p1['hp'] < p1['max_hp'] * 0.4:
+        text += "\n😡 ЯРОСТЬ АКТИВНА"
     text += "\n\n"
     
     text += f"🎮 <b>{p2['name']}</b> [{p2['role']}]\n"
     text += f"HP: {p2['hp']}/{p2['max_hp']} {make_hp_bar(p2['hp'], p2['max_hp'])}"
     if p2['type'] == 'v2':
         text += f"\n{make_rage_bar(p2)}"
+    if p2['type'] == 'gabriel' and p2['hp'] < p2['max_hp'] * 0.4:
+        text += "\n😡 ЯРОСТЬ АКТИВНА"
     text += "\n\n"
     
     text += f"📜 <b>Лог:</b> {duel['log']}\n\n"
@@ -570,24 +585,34 @@ def get_duel_keyboard(duel_id: str):
     return builder.as_markup()
 
 
-async def update_duel_message(message, text, reply_markup=None, animation=None):
+def gabriel_in_rage(player):
+    return player['type'] == 'gabriel' and player['hp'] < player['max_hp'] * 0.4
+
+
+def apply_incoming_damage(player, damage):
+    if gabriel_in_rage(player):
+        damage *= 2
+    if player['type'] == 'gabriel' and player['taunt']:
+        player['taunt'] = False
+        player['attack_buff'] = 7
+        damage = int(damage * 0.6)
+    return damage
+
+
+async def replace_duel_message(message, text, reply_markup=None, animation=None):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if animation:
-        await message.edit_media(
-            media=InputMediaAnimation(
-                media=animation,
-                caption=text,
-                parse_mode="HTML",
-            ),
-            reply_markup=reply_markup,
-        )
-    elif message.animation:
-        await message.edit_caption(
+        return await message.answer_animation(
+            animation=animation,
             caption=text,
             reply_markup=reply_markup,
             parse_mode="HTML",
         )
-    else:
-        await message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    return await message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
 
 
 async def finish_duel_action(
@@ -618,21 +643,7 @@ async def finish_duel_action(
                     win_credits, win_xp, winner['id']
                 )
             del active_duels[duel_id]
-            try:
-                await update_duel_message(callback.message, text, animation=animation)
-            except Exception:
-                try:
-                    await callback.message.delete()
-                except Exception:
-                    pass
-                if animation:
-                    await callback.message.answer_animation(
-                        animation=animation,
-                        caption=text,
-                        parse_mode="HTML",
-                    )
-                else:
-                    await callback.message.answer(text, parse_mode="HTML")
+            await replace_duel_message(callback.message, text, animation=animation)
             await callback.answer(answer_text or "Ты выиграл.")
             return
 
@@ -643,22 +654,7 @@ async def finish_duel_action(
 
     text = render_duel_text(duel_id)
     kb = get_duel_keyboard(duel_id)
-    try:
-        await update_duel_message(callback.message, text, kb, animation=animation)
-    except Exception:
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
-        if animation:
-            await callback.message.answer_animation(
-                animation=animation,
-                caption=text,
-                reply_markup=kb,
-                parse_mode="HTML",
-            )
-        else:
-            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await replace_duel_message(callback.message, text, kb, animation=animation)
     await callback.answer(answer_text or "")
 
 
@@ -1165,8 +1161,8 @@ async def cb_duel_accept(callback: types.CallbackQuery):
         turn_id = random.choice([p1_id, p2_id])
         
         active_duels[duel_id] = {
-            "p1": {"id": p1_id, "name": p1_name, "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "rage": 0, "rage_turns": 0, "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
-            "p2": {"id": p2_id, "name": p2_name, "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "rage": 0, "rage_turns": 0, "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p1": {"id": p1_id, "name": p1_name, "role": p1_data['role_name'], "hp": c1['hp'], "max_hp": c1['max_hp'], "atk": c1['atk'], "type": c1['type'], "rage": 0, "rage_turns": 0, "rage_transitioned": False, "taunt": False, "attack_buff": 0, "rage_skill_used": False, "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
+            "p2": {"id": p2_id, "name": p2_name, "role": p2_data['role_name'], "hp": c2['hp'], "max_hp": c2['max_hp'], "atk": c2['atk'], "type": c2['type'], "rage": 0, "rage_turns": 0, "rage_transitioned": False, "taunt": False, "attack_buff": 0, "rage_skill_used": False, "cd": 0, "block": False, "stun": False, "parry": False, "item_used": False},
             "turn": turn_id,
             "turn_count": 0,
             "log": f"🎲 Жеребьевка прошла! Первым ходит: {'Игрок 1' if turn_id == p1_id else 'Игрок 2'}"
@@ -1204,6 +1200,10 @@ async def cb_fight(callback: types.CallbackQuery):
     attacker = duel['p1'] if is_p1 else duel['p2']
     defender = duel['p2'] if is_p1 else duel['p1']
     defender_hp_before = defender['hp']
+
+    if gabriel_in_rage(attacker) and action not in ('atk', 'skill'):
+        await callback.answer("😡 Габриэль в ярости и может только атаковать!", show_alert=True)
+        return
     
     log_msg = ""
     attacker['block'] = False 
@@ -1218,13 +1218,16 @@ async def cb_fight(callback: types.CallbackQuery):
         if action == "atk":
             if attacker['type'] == 'god':
                 dmg = attacker['atk']
-                defender['hp'] -= dmg
+                defender['hp'] -= apply_incoming_damage(defender, dmg)
                 log_msg = f"🥵 <b>{attacker['name']}</b> танцует тверк и наносит {dmg} морального урона!"
             elif defender['type'] == 'god':
-                attacker['hp'] -= 99999
+                attacker['hp'] -= apply_incoming_damage(attacker, 99999)
                 log_msg = f"🤩 Твоя жалкая попытка коснуться Всевышнего — тщетна и за это... <b>{attacker['name']}</b> был отправлен на сво (-99999 HP)."
             else:
-                dmg = max(0, attacker['atk'] + random.randint(0, 0))
+                dmg = max(0, attacker['atk'] + attacker['attack_buff'])
+                attacker['attack_buff'] = 0
+                if gabriel_in_rage(attacker):
+                    dmg *= 2
                 
                 if attacker['type'] == 'v2' and attacker['rage_turns'] > 0:
                     dmg += 12
@@ -1239,7 +1242,7 @@ async def cb_fight(callback: types.CallbackQuery):
                     defender['parry'] = False 
                     if random.random() < 1.0:
                         reflected_dmg = dmg 
-                        attacker['hp'] -= reflected_dmg 
+                        attacker['hp'] -= apply_incoming_damage(attacker, reflected_dmg)
                         dmg = 0 
                         log_msg = f"💥 БАМ! {defender['name']} ПАРИРУЕТ атаку и впечатывает {reflected_dmg} урона обратно!"
                         turn_gif = SKILL_GIFS.get("v1") # гифка для парирования
@@ -1251,8 +1254,8 @@ async def cb_fight(callback: types.CallbackQuery):
                     if defender['block']:
                         dmg = int(dmg * 0.5)
                         log_msg = f"🛡 {defender['name']} блокирует часть урона!\n"
-                    
-                    defender['hp'] -= dmg
+
+                    defender['hp'] -= apply_incoming_damage(defender, dmg)
                     log_msg += f"👊 {attacker['name']} наносит {dmg} урона!"
 
                     if attacker['type'] == 'v1':
@@ -1279,7 +1282,7 @@ async def cb_fight(callback: types.CallbackQuery):
             if r_type == "god": 
                 attacker['cd'] = 0
                 dmg = int(defender['max_hp'] * 0.99)
-                defender['hp'] -= dmg
+                defender['hp'] -= apply_incoming_damage(defender, dmg)
                 log_msg = f"😏 <b>{attacker['name']}</b> начал заигрывать с <b>{defender['name']}</b> и у него случился моральный распад. Нанесено {dmg} морального урона!"
                     
             elif r_type == "minos":
@@ -1287,15 +1290,31 @@ async def cb_fight(callback: types.CallbackQuery):
                 if random.random() < 0.35:
                     log_msg = f"💥 {attacker['name']} кричит «ЖАААЖМЕНТ!», но промахивается!"
                 else:
-                    defender['hp'] -= 45
+                    defender['hp'] -= apply_incoming_damage(defender, 45)
                     log_msg = f"⚖️ {attacker['name']} обрушивает «ЖАААЖМЕНТ!», Нанесено 45 урона!"
                     
             elif r_type == "v2":
                 attacker['cd'] = 3
                 defender['stun'] = True
                 skill_damage = 20 + (12 if attacker['rage_turns'] > 0 else 0)
-                defender['hp'] -= skill_damage
+                defender['hp'] -= apply_incoming_damage(defender, skill_damage)
                 log_msg = f"🥊 {attacker['name']} бьет Кнаклбластером на {skill_damage} урона! {defender['name']} решил поспать."
+
+            elif r_type == "gabriel":
+                if gabriel_in_rage(attacker):
+                    if attacker['rage_skill_used']:
+                        await callback.answer("😡 Яростная способность Габриэля уже использована.", show_alert=True)
+                        return
+                    attacker['rage_skill_used'] = True
+                    skill_damage = int(defender['max_hp'] * 0.5)
+                    defender['hp'] -= apply_incoming_damage(defender, skill_damage)
+                    turn_gif = GABRIEL_SKILL_GIFS["rage"] or None
+                    log_msg = f"☠ <b>{attacker['name']}</b> кричит: «{random.choice(GABRIEL_RAGE_QUOTES)}» И в порыве гнева сносит аж 50% здоровья оппоненту!"
+                else:
+                    attacker['cd'] = 2
+                    attacker['taunt'] = True
+                    turn_gif = GABRIEL_SKILL_GIFS["taunt"] or None
+                    log_msg = f"😝 <b>{attacker['name']}</b> насмехается над противником: «{random.choice(GABRIEL_TAUNTS)}»"
                     
             elif r_type == "v1": 
                 attacker['cd'] = 3
@@ -1341,11 +1360,21 @@ async def cb_fight(callback: types.CallbackQuery):
     duel['log'] = log_msg
 
     damage_taken = max(0, defender_hp_before - defender['hp'])
+    if (
+        defender['type'] == 'gabriel'
+        and not defender['rage_transitioned']
+        and defender_hp_before >= defender['max_hp'] * 0.4
+        and defender['hp'] < defender['max_hp'] * 0.4
+    ):
+        defender['rage_transitioned'] = True
+        turn_gif = GABRIEL_SKILL_GIFS["rage_transition"] or turn_gif
+
     if defender['type'] == 'v2' and damage_taken > 0 and defender['rage_turns'] == 0:
         defender['rage'] = min(100, defender['rage'] + 25)
         if defender['rage'] == 100:
             defender['rage'] = 0
             defender['rage_turns'] = 4
+            duel['log'] += f"💢 {defender['name']} впал в ярость!"
     elif defender['type'] == 'v2' and damage_taken == 0 and defender['rage'] > 0 and defender['rage_turns'] == 0:
         defender['rage'] = max(0, defender['rage'] - 25)
 
@@ -1382,6 +1411,10 @@ async def cb_use_item(callback: types.CallbackQuery):
     attacker = duel['p1'] if is_p1 else duel['p2']
     defender = duel['p2'] if is_p1 else duel['p1']
 
+    if gabriel_in_rage(attacker):
+        await callback.answer("😡 Габриэль в ярости и может только атаковать!", show_alert=True)
+        return
+
     if attacker['item_used']:
         await callback.answer("🎒 За ход можно использовать только один предмет.", show_alert=True)
         return
@@ -1404,7 +1437,7 @@ async def cb_use_item(callback: types.CallbackQuery):
         attacker['hp'] = min(attacker['max_hp'], attacker['hp'] + e_val)
         duel['log'] = f"🧪 {attacker['name']} выпивает {item['name']}! Восстановлено {e_val} HP."
     elif e_type == 'dmg':
-        defender['hp'] -= e_val
+        defender['hp'] -= apply_incoming_damage(defender, e_val)
         duel['log'] = f"💣 {attacker['name']} швыряет {item['name']} в лицо противнику на {e_val} урона!"
     elif e_type == 'buff':
         attacker['atk'] += e_val
@@ -1477,6 +1510,10 @@ async def cb_chest_claim(callback: types.CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer(f"Ты получил {reward} кредитов!")
+
+@dp.message(F.animation)
+async def get_gif_id(message: Message):
+    await message.answer(f"ID вашей гифки:\n{message.animation.file_id}", parse_mode="MarkdownV2")
 
 #СЕРВЕр
 async def health_check(request):

@@ -1,9 +1,10 @@
 """Static game balance data."""
 
 CHARACTERS = {
-    1: {"hp": 100, "max_hp": 100, "atk": 15, "type": "v1"},
-    2: {"hp": 125, "max_hp": 125, "atk": 15, "type": "v2"},
+    1: {"hp": 100, "max_hp": 100, "atk": 12, "type": "v1"},
+    2: {"hp": 120, "max_hp": 120, "atk": 14, "type": "v2"},
     3: {"hp": 140, "max_hp": 140, "atk": 20, "type": "minos"},
+    4: {"hp": 130, "max_hp": 130, "atk": 16, "type": "gabriel"},
     999: {"hp": 99999, "max_hp": 99999, "atk": 99999, "type": "god"},
 }
 
@@ -12,6 +13,12 @@ SKILL_GIFS = {
     "minos": "CgACAgIAAxkBAAOBaoTqBA5NC1-tj3E4kfpmln15A28AAgmqAAKU3yFI3isVHX0Wp6g9BA",
     "v2": "CgACAgIAAxkBAAOGaoTqtU_-i746Ps8je2RcBBQ4VlQAAgyqAAKU3yFIC7s2LleYvjM9BA",
     "v1": "CgACAgIAAxkBAAOIaoTq1KHEeqRI6UISOtOq-8QJWFIAAg2qAAKU3yFInZVWVcf-7Jo9BA",
+}
+
+GABRIEL_SKILL_GIFS = {
+    "taunt": "",
+    "rage": "",
+    "rage_transition": "",
 }
 
 SLOT_SYMBOLS = {
