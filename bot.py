@@ -118,7 +118,6 @@ class CombatLockMiddleware(BaseMiddleware):
         user_id = getattr(getattr(event, "from_user", None), "id", None)
         if user_id is not None and user_in_active_duel(user_id):
             if isinstance(event, Message):
-                await event.answer("⚔️ Во время боя доступны только боевые действия.")
                 return
             if isinstance(event, types.CallbackQuery):
                 callback_data = event.data or ""
@@ -557,7 +556,16 @@ def get_duel_keyboard(duel_id: str):
     return builder.as_markup()
 
 
-async def finish_duel_action(callback, duel_id, attacker, defender, *, pass_turn=True, answer_text=None):
+async def finish_duel_action(
+    callback,
+    duel_id,
+    attacker,
+    defender,
+    *,
+    pass_turn=True,
+    answer_text=None,
+    animation=None,
+):
     duel = active_duels[duel_id]
 
     if defender['hp'] <= 0 or attacker['hp'] <= 0:
@@ -581,6 +589,11 @@ async def finish_duel_action(callback, duel_id, attacker, defender, *, pass_turn
             except Exception:
                 pass
             await callback.message.answer(text, parse_mode="HTML")
+            if animation:
+                try:
+                    await callback.message.answer_animation(animation=animation)
+                except Exception:
+                    logging.exception("Не удалось отправить GIF способности")
             await callback.answer(answer_text or "Ты выиграл.")
             return
 
@@ -599,6 +612,11 @@ async def finish_duel_action(callback, duel_id, attacker, defender, *, pass_turn
         except Exception:
             pass
         await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    if animation:
+        try:
+            await callback.message.answer_animation(animation=animation)
+        except Exception:
+            logging.exception("Не удалось отправить GIF способности")
     await callback.answer(answer_text or "")
 
 
@@ -1224,7 +1242,7 @@ async def cb_fight(callback: types.CallbackQuery):
             elif r_type == "v1": 
                 attacker['cd'] = 3
                 attacker['parry'] = True
-                log_msg = f"😈 {attacker['name']} готовится парировать следующую атаку!"
+                log_msg = f"🪙 {attacker['name']} готовится парировать следующую атаку!"
             else:
                 log_msg = f"У {attacker['name']} нет особых навыков. Ну и лох XD"
             
@@ -1264,7 +1282,7 @@ async def cb_fight(callback: types.CallbackQuery):
 
     duel['log'] = log_msg
     
-    await finish_duel_action(callback, duel_id, attacker, defender)
+    await finish_duel_action(callback, duel_id, attacker, defender, animation=turn_gif)
     
 @dp.callback_query(F.data.startswith("fight_back_"))
 async def cb_fight_back(callback: types.CallbackQuery):
@@ -1327,6 +1345,10 @@ async def cb_use_item(callback: types.CallbackQuery):
 @dp.message(F.text & ~F.text.startswith('/'))
 async def track_messages(message: types.Message):
     user_id = message.from_user.id
+
+    if user_in_active_duel(user_id):
+        return
+
     msg_text = message.text.lower()
     chat_id = message.chat.id
 
