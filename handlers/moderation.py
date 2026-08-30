@@ -14,11 +14,12 @@ def register_moderation_handlers(
     *,
     db_pool_getter: Callable,
     bot,
-    admin_usernames,
+    get_admin_level: Callable,
     shop_data: dict,
     refresh_shop_if_needed: Callable,
     trigger_cache: dict,
     parse_time: Callable,
+    owner_user_id: int,
 ):
     async def log_mod_action(target_id: int, target_name: str, admin_name: str, action: str, reason: str):
         """Записывает действие в дневник"""
@@ -50,8 +51,8 @@ def register_moderation_handlers(
                 return row['user_id'], f"@{row['username']}", args[1:]
             else:
                 await message.answer(
-                    f"❌ Пользователь {possible_user} не найден в базе данных бота.\n"
-                    f"<i>(Чтобы бот его «увидел», он должен написать хотя бы одно сообщение в чат)</i>",
+                    f"❌ {possible_user} не найден в бд.\n"
+                    f"<i>(Чтобы картер его «увидел», он должен написать хотя бы одно сообщение в чат)</i>",
                     parse_mode="HTML"
                 )
                 return None, None, None
@@ -65,12 +66,20 @@ def register_moderation_handlers(
         await message.answer("⚠️ Ответь на сообщение или укажи @username!")
         return None, None, None
 
-    def is_admin(message: types.Message):
-        return (message.from_user.username or "").lower() in [a.lower() for a in admin_usernames]
+    async def check_admin_level(message: types.Message, required_level: int) -> bool:
+        """Проверяет, что уровень админа соответствует требуемому."""
+        admin_level = await get_admin_level(message.from_user.id)
+        if admin_level < required_level:
+            level_names = {1: "младший", 2: "средний", 3: "старший", 4: "владелец"}
+            await message.answer(
+                f"❌ Эта команда доступна только для {level_names.get(required_level, 'админа')} админов и выше!"
+            )
+            return False
+        return True
 
     @dp.message(Command("warn"))
     async def cmd_warn(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 1): return
 
         target_id, target_name, rem_args = await get_target_and_args(message)
         if not target_id: return
@@ -113,7 +122,7 @@ def register_moderation_handlers(
 
     @dp.message(Command("unwarn"))
     async def cmd_unwarn(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 1): return
 
         target_id, target_name, rem_args = await get_target_and_args(message)
         if not target_id: return
@@ -134,7 +143,7 @@ def register_moderation_handlers(
 
     @dp.message(Command("mute"))
     async def cmd_mute(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 2): return
 
         target_id, target_name, rem_args = await get_target_and_args(message)
         if not target_id: return
@@ -164,9 +173,18 @@ def register_moderation_handlers(
         await log_mod_action(target_id, target_name, admin_name, f"MUTE ({time_str})", reason)
         await message.answer(f"🤐 <b>{target_name}</b> отправлен в мут на {time_str}.\n📝 Причина: {reason}", parse_mode="HTML")
 
+        # Дополнительное логирование в модлог
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=admin_name,
+            action=f"MUTE_CMD ({time_str})",
+            reason=f"Мут пользователя {target_name}: {reason}"
+        )
+
     @dp.message(Command("unmute"))
     async def cmd_unmute(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 2): return
 
         target_id, target_name, rem_args = await get_target_and_args(message)
         if not target_id: return
@@ -190,9 +208,18 @@ def register_moderation_handlers(
         await log_mod_action(target_id, target_name, admin_name, "UNMUTE", reason)
         await message.answer(f"🔊 <b>{target_name}</b> снова может говорить!\n📝 Причина: {reason}", parse_mode="HTML")
 
+        # Дополнительное логирование в модлог
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=admin_name,
+            action="UNMUTE_CMD",
+            reason=f"Размут пользователя {target_name}: {reason}"
+        )
+
     @dp.message(Command("ban"))
     async def cmd_ban(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 3): return
 
         target_id, target_name, rem_args = await get_target_and_args(message)
         if not target_id: return
@@ -206,11 +233,20 @@ def register_moderation_handlers(
             return await message.answer(f"❌ Ошибка бана: {e}")
 
         await log_mod_action(target_id, target_name, admin_name, "BAN", reason)
-        await message.answer(f"🔨 <b>{target_name}</b> забанен админом.\n📝 Причина: {reason}", parse_mode="HTML")
+        await message.answer(f"🔨 <b>{target_name}</b> забанен.\n📝 Причина: {reason}", parse_mode="HTML")
+
+        # Дополнительное логирование в модлог
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=admin_name,
+            action="BAN_CMD",
+            reason=f"Бан пользователя {target_name}: {reason}"
+        )
 
     @dp.message(Command("unban"))
     async def cmd_unban(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 3): return
 
         target_id, target_name, rem_args = await get_target_and_args(message)
         if not target_id: return
@@ -225,9 +261,18 @@ def register_moderation_handlers(
         await log_mod_action(target_id, target_name, admin_name, "UNBAN", reason)
         await message.answer(f"🔓 <b>{target_name}</b> разбанен!\n📝 Причина: {reason}", parse_mode="HTML")
 
+        # Дополнительное логирование в модлог
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=admin_name,
+            action="UNBAN_CMD",
+            reason=f"Разбан пользователя {target_name}: {reason}"
+        )
+
     @dp.message(Command("diary", "logs"))
     async def cmd_diary(message: types.Message):
-        if not is_admin(message): return
+        if not await check_admin_level(message, 3): return
 
         target_id, target_name, _ = await get_target_and_args(message)
         if not target_id: return
@@ -253,7 +298,7 @@ def register_moderation_handlers(
 
     @dp.message(Command("addtrigger"))
     async def cmd_add_trigger(message: types.Message):
-        if not is_admin(message):
+        if not await check_admin_level(message, 3):
             return
 
         raw_text = message.text.replace("/addtrigger", "").strip()
@@ -274,12 +319,21 @@ def register_moderation_handlers(
                 phrase_clean, reply
             )
 
+            # Логируем действие
+            await log_mod_action(
+                target_id=message.from_user.id,
+                target_name=message.from_user.username or "Admin",
+                admin_name=message.from_user.username or "Admin",
+                action="ADD_TRIGGER",
+                reason=f"Триггер: {phrase_clean}"
+            )
+
         trigger_cache[phrase_clean] = reply # Сразу обновляем память
         await message.answer(f"✅ Триггер создан!\n<b>Ключ:</b> <code>{phrase_clean}</code>\n<b>Ответ:</b> {reply}", parse_mode="HTML")
 
     @dp.message(Command("deltrigger"))
     async def cmd_del_trigger(message: types.Message):
-        if not is_admin(message):
+        if not await check_admin_level(message, 3):
             return
 
         phrase_clean = message.text.replace("/deltrigger", "").strip().lower()
@@ -289,6 +343,16 @@ def register_moderation_handlers(
 
         async with db_pool_getter().acquire() as conn:
             res = await conn.execute("DELETE FROM triggers WHERE phrase = $1", phrase_clean)
+
+            # Логируем действие
+            if res == "DELETE 1":
+                await log_mod_action(
+                    target_id=message.from_user.id,
+                    target_name=message.from_user.username or "Admin",
+                    admin_name=message.from_user.username or "Admin",
+                    action="DEL_TRIGGER",
+                    reason=f"Триггер: {phrase_clean}"
+                )
 
         if res == "DELETE 1":
             trigger_cache.pop(phrase_clean, None) # Удаляем из памяти
@@ -310,7 +374,7 @@ def register_moderation_handlers(
 
     @dp.message(Command("reset"))
     async def cmd_reset(message: types.Message):
-        if not is_admin(message):
+        if not await check_admin_level(message, 4):
             return
         args = message.text.split()
         if len(args) != 2:
@@ -319,11 +383,22 @@ def register_moderation_handlers(
         target = args[1].replace("@", "")
         async with db_pool_getter().acquire() as conn:
             res = await conn.execute("UPDATE users SET role_changes = 0 WHERE username = $1", target)
+
+            # Логируем действие
+            if res == "UPDATE 1":
+                await log_mod_action(
+                    target_id=message.from_user.id,
+                    target_name=message.from_user.username or "Admin",
+                    admin_name=message.from_user.username or "Admin",
+                    action="RESET_ROLE_CHANGES",
+                    reason=f"Сброс лимита смен ролей для @{target}"
+                )
+
         await message.answer(f"✅ Лимит для @{target} сброшен!" if res == "UPDATE 1" else "❌ Пользователь не найден.")
 
     @dp.message(Command("send"))
     async def cmd_broadcast(message: types.Message):
-        if not is_admin(message):
+        if not await check_admin_level(message, 4):
             return
         text = message.text.replace("/send", "").strip()
         if not text:
@@ -344,8 +419,8 @@ def register_moderation_handlers(
 
     @dp.message(Command("reroll"))
     async def cmd_reroll_shop(message: types.Message):
-        # Защита: работает только для админов
-        if not is_admin(message):
+        # Защита: работает только для владельца
+        if not await check_admin_level(message, 4):
             return
 
         # Откидываем время последнего обновления в самый минимум
@@ -354,4 +429,241 @@ def register_moderation_handlers(
         # Вызываем обычную функцию обновления (она увидит, что время вышло, и сменит товар)
         await refresh_shop_if_needed()
 
+        # Логируем действие
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=message.from_user.username or "Admin",
+            action="REROLL_SHOP",
+            reason="Принудительное обновление магазина"
+        )
+
         await message.answer("🔄 Витрина Магазина принудительно обновлена! (Админ абьюз).")
+
+    # --- Команды управления админами ---
+
+    @dp.message(Command("addadmin"))
+    async def cmd_add_admin(message: types.Message):
+        if not await check_admin_level(message, 4):
+            return
+
+        args = message.text.split()[1:]
+        if len(args) < 2:
+            await message.answer(
+                "⚠️ Использование: <code>/addadmin @username [1-3]</code>\n"
+                "1 = младший админ (варны)\n"
+                "2 = средний админ (+ муты)\n"
+                "3 = старший админ (+ баны, триггеры)",
+                parse_mode="HTML"
+            )
+            return
+
+        username = args[0].lstrip("@").lower()
+        try:
+            level = int(args[1])
+            if level not in [1, 2, 3]:
+                await message.answer("❌ Уровень должен быть 1, 2 или 3!")
+                return
+        except ValueError:
+            await message.answer("❌ Уровень должен быть числом (1, 2 или 3)!")
+            return
+
+        async with db_pool_getter().acquire() as conn:
+            # Проверяем существование пользователя
+            user = await conn.fetchrow(
+                "SELECT user_id, username FROM users WHERE LOWER(username) = $1",
+                username
+            )
+            if not user:
+                await message.answer(f"❌ Пользователь @{username} не найден в бд!")
+                return
+
+            user_id = user['user_id']
+            real_username = user['username'] or username
+
+            # Проверяем, не является ли он владельцем
+            if user_id == owner_user_id:
+                await message.answer("❌ Он уже владелец!")
+                return
+
+            # Проверяем, не является ли он уже админом
+            existing_level = await conn.fetchval(
+                "SELECT level FROM admin_levels WHERE user_id = $1",
+                user_id
+            )
+            if existing_level:
+                await message.answer(
+                    f"❌ @{real_username} уже админ уровня {existing_level}! "
+                    f"Сначала используй /removeadmin."
+                )
+                return
+
+            # Добавляем админа
+            await conn.execute(
+                """
+                INSERT INTO admin_levels (user_id, level, username, promoted_by, promoted_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                """,
+                user_id, level, real_username, message.from_user.id
+            )
+
+            # Обновляем admin_level в users
+            await conn.execute(
+                "UPDATE users SET admin_level = $1 WHERE user_id = $2",
+                level, user_id
+            )
+
+        level_names = {1: "младший", 2: "средний", 3: "старший"}
+        await message.answer(
+            f"✅ @{real_username} назначен как {level_names[level]} админ!",
+            parse_mode="HTML"
+        )
+
+        # Логируем действие
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=message.from_user.username or "Admin",
+            action=f"ADD_ADMIN_LEVEL_{level}",
+            reason=f"Назначен админом уровня {level} для @{real_username}"
+        )
+
+    @dp.message(Command("removeadmin"))
+    async def cmd_remove_admin(message: types.Message):
+        if not await check_admin_level(message, 4):
+            return
+
+        args = message.text.split()[1:]
+        if not args:
+            await message.answer("⚠️ Использование: <code>/removeadmin @username</code>", parse_mode="HTML")
+            return
+
+        username = args[0].lstrip("@").lower()
+
+        async with db_pool_getter().acquire() as conn:
+            # Проверяем существование пользователя
+            user = await conn.fetchrow(
+                "SELECT user_id, username, admin_level FROM users WHERE LOWER(username) = $1",
+                username
+            )
+            if not user:
+                await message.answer(f"❌ Пользователь @{username} не найден в бд!")
+                return
+
+            user_id = user['user_id']
+            real_username = user['username'] or username
+            current_level = user['admin_level'] or 0
+
+            # Проверяем, не является ли он владельцем
+            if user_id == owner_user_id:
+                await message.answer("❌ не ахуевай.")
+                return
+
+            # Проверяем, является ли он админом
+            if current_level == 0:
+                await message.answer(f"❌ @{real_username} не является админом!")
+                return
+
+            # Удаляем из admin_levels
+            result = await conn.execute(
+                "DELETE FROM admin_levels WHERE user_id = $1",
+                user_id
+            )
+
+            if result == "DELETE 0":
+                await message.answer(f"❌ @{real_username} не найден в таблице админов!")
+                return
+
+            # Обнуляем admin_level в users
+            await conn.execute(
+                "UPDATE users SET admin_level = 0 WHERE user_id = $1",
+                user_id
+            )
+
+        await message.answer(f"✅ @{real_username} удален из админов!", parse_mode="HTML")
+
+        # Логируем действие
+        await log_mod_action(
+            target_id=message.from_user.id,
+            target_name=message.from_user.username or "Admin",
+            admin_name=message.from_user.username or "Admin",
+            action="REMOVE_ADMIN",
+            reason=f"Удален админ уровня {current_level} (@{real_username})"
+        )
+
+    @dp.message(Command("admins"))
+    async def cmd_list_admins(message: types.Message):
+        admin_level = await get_admin_level(message.from_user.id)
+        if admin_level == 0:
+            await message.answer("❌ Эта команда только для админов!")
+            return
+
+        async with db_pool_getter().acquire() as conn:
+            admins = await conn.fetch(
+                """
+                SELECT al.user_id, al.level, al.username, al.promoted_by, al.promoted_at,
+                       u.username as current_username
+                FROM admin_levels al
+                LEFT JOIN users u ON al.user_id = u.user_id
+                ORDER BY al.level DESC, al.promoted_at ASC
+                """
+            )
+
+        if not admins:
+            await message.answer("❌ Админов нет в системе.")
+            return
+
+        level_names = {
+            1: "🔹 Младший админ",
+            2: "🔸 Средний админ",
+            3: "🔶 Старший админ",
+            4: "👑 Главнейший и Всемилюбимый"
+        }
+
+        text = "📋 <b>Список админов:</b>\n\n"
+
+        for admin in admins:
+            level = admin['level']
+            username = admin['current_username'] or admin['username']
+            promoted_at = admin['promoted_at'].strftime("%d.%m.%Y %H:%M")
+
+            if level == 4:
+                text += f"{level_names[level]}: @{username}\n"
+            else:
+                promoter = await get_admin_level(admin['promoted_by'] or 0)
+                promoter_name = "Система" if promoter == 4 else f"ID {admin['promoted_by']}"
+                text += f"{level_names[level]}: @{username} (назначен: {promoted_at}, от: {promoter_name})\n"
+
+        await message.answer(text, parse_mode="HTML")
+
+    @dp.message(Command("myadminlevel"))
+    async def cmd_my_admin_level(message: types.Message):
+        user_id = message.from_user.id
+        admin_level = await get_admin_level(user_id)
+
+        if admin_level == 0:
+            await message.answer("❌ Ты не админ.")
+            return
+
+        level_names = {
+            1: "🔹 Младший админ",
+            2: "🔸 Средний админ",
+            3: "🔶 Старший админ",
+            4: "👑 Главнейший и Всемилюбимый"
+        }
+
+        permissions = {
+            1: "/warn, /unwarn",
+            2: "/warn, /unwarn, /mute, /unmute",
+            3: "/warn, /unwarn, /mute, /unmute, /ban, /unban, /diary, /addtrigger, /deltrigger",
+            4: "Все команды + управление всем"
+        }
+
+        text = (
+            f"🎛 <b>Твой админский уровень:</b>\n\n"
+            f"{level_names[admin_level]}\n\n"
+            f"📋 <b>Доступные команды:</b>\n"
+            f"{permissions[admin_level]}"
+        )
+
+        await message.answer(text, parse_mode="HTML")
