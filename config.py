@@ -18,19 +18,13 @@ SITE_ORIGIN = os.environ.get("SITE_ORIGIN", "https://sialensxd.github.io")
 SITE_URL = os.environ.get("SITE_URL", "https://sialensxd.github.io/indi-space-hub/")
 PORT = int(os.environ.get("PORT", "10000"))
 
-ADMIN_USERNAMES = {
-    username.strip().lstrip("@").lower()
-    for username in os.environ.get("ADMIN_USERNAMES", "sialens_xd").split(",")
-    if username.strip()
-}
-
 ALLOWED_GROUPS = {
     int(chat_id.strip())
     for chat_id in os.environ.get("ALLOWED_GROUPS", "-1003994387386").split(",")
     if chat_id.strip()
 }
 
-ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", "7857165309"))
+OWNER_USER_ID = int(os.environ.get("OWNER_USER_ID", "7857165309"))
 
 
 def webhook_url() -> str | None:

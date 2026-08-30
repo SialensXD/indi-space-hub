@@ -10,8 +10,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 from config import (
-    ADMIN_USER_ID,
-    ADMIN_USERNAMES,
+    OWNER_USER_ID,
     ALLOWED_GROUPS,
     BOT_TOKEN,
     DATABASE_URL,
@@ -227,6 +226,13 @@ async def init_db():
                     published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     is_visible BOOLEAN NOT NULL DEFAULT TRUE
                 );
+                CREATE TABLE IF NOT EXISTS admin_levels (
+                    user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+                    level INTEGER NOT NULL DEFAULT 1,
+                    username TEXT NOT NULL,
+                    promoted_by BIGINT REFERENCES users(user_id),
+                    promoted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
             """)
             await conn.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
@@ -240,6 +246,7 @@ async def init_db():
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS wins INTEGER DEFAULT 0;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS warns INTEGER DEFAULT 0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_level INTEGER DEFAULT 0;
 
                 ALTER TABLE roles ADD COLUMN IF NOT EXISTS name TEXT;
                 ALTER TABLE items ADD COLUMN IF NOT EXISTS name TEXT;
@@ -262,15 +269,99 @@ async def init_db():
                 ALTER TABLE mod_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
                 ALTER TABLE site_applications ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'Не указана';
 
+                ALTER TABLE admin_levels ADD COLUMN IF NOT EXISTS user_id BIGINT;
+                ALTER TABLE admin_levels ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1;
+                ALTER TABLE admin_levels ADD COLUMN IF NOT EXISTS username TEXT;
+                ALTER TABLE admin_levels ADD COLUMN IF NOT EXISTS promoted_by BIGINT;
+                ALTER TABLE admin_levels ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ DEFAULT NOW();
+
                 CREATE UNIQUE INDEX IF NOT EXISTS users_user_id_unique ON users (user_id);
             """)
         logging.info("✅ Подключение к БД успешно!")
+
+        # Миграция существующего админа в новую систему
+        await migrate_existing_admin()
     except Exception as e:
         logging.exception("❌ Ошибка БД")
         if db_pool is not None:
             await db_pool.close()
             db_pool = None
         raise RuntimeError("Database initialization failed") from e
+
+async def migrate_existing_admin():
+    """Мигрирует существующего админа из переменных окружения в новую систему."""
+    from config import OWNER_USER_ID
+    import os
+
+    # Получаем старых админов из переменных окружения для миграции
+    admin_usernames = {
+        username.strip().lstrip("@").lower()
+        for username in os.environ.get("ADMIN_USERNAMES", "sialens_xd").split(",")
+        if username.strip()
+    }
+
+    # Сначала обновляем admin_level в таблице users для владельца
+    async with db_pool.acquire() as conn:
+        # Устанавливаем уровень 4 для владельца
+        await conn.execute(
+            "UPDATE users SET admin_level = 4 WHERE user_id = $1",
+            OWNER_USER_ID
+        )
+
+        # Проверяем, есть ли владелец в admin_levels
+        owner_in_admin_levels = await conn.fetchval(
+            "SELECT 1 FROM admin_levels WHERE user_id = $1",
+            OWNER_USER_ID
+        )
+
+        if not owner_in_admin_levels:
+            # Получаем username владельца
+            owner_username = await conn.fetchval(
+                "SELECT username FROM users WHERE user_id = $1",
+                OWNER_USER_ID
+            )
+            if owner_username:
+                # Добавляем владельца в admin_levels
+                await conn.execute(
+                    """
+                    INSERT INTO admin_levels (user_id, level, username, promoted_by, promoted_at)
+                    VALUES ($1, 4, $2, NULL, NOW())
+                    """,
+                    OWNER_USER_ID, owner_username
+                )
+                logging.info(f"👑 Владелец @{owner_username} добавлен в систему админов как уровень 4")
+
+        # Мигрируем старых админов из переменных окружения (если есть)
+        for username in admin_usernames:
+            clean_username = username.strip().lstrip("@").lower()
+            # Пропускаем владельца, так как он уже обработан
+            user_id = await conn.fetchval(
+                "SELECT user_id FROM users WHERE LOWER(username) = $1",
+                clean_username
+            )
+            if user_id and user_id != OWNER_USER_ID:
+                # Проверяем, есть ли уже этот пользователь в admin_levels
+                existing_level = await conn.fetchval(
+                    "SELECT level FROM admin_levels WHERE user_id = $1",
+                    user_id
+                )
+                if not existing_level:
+                    # Добавляем как старшего админа (уровень 3) для обратной совместимости
+                    await conn.execute(
+                        """
+                        INSERT INTO admin_levels (user_id, level, username, promoted_by, promoted_at)
+                        VALUES ($1, 3, $2, $3, NOW())
+                        """,
+                        user_id, clean_username, OWNER_USER_ID
+                    )
+                    # Обновляем admin_level в users
+                    await conn.execute(
+                        "UPDATE users SET admin_level = 3 WHERE user_id = $1",
+                        user_id
+                    )
+                    logging.info(f"🔧 Админ @{clean_username} мигрирован в систему как уровень 3")
+
+        logging.info("✅ Миграция админов завершена!")
 
 async def refresh_shop_if_needed(*, notify=True):
     global shop_data
@@ -316,14 +407,23 @@ async def get_user(user_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow(
             """
-            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, u.title_id, 
-                   u.msg_count, u.notifications_enabled, r.name as role_name 
-            FROM users u 
-            LEFT JOIN roles r ON u.role_id = r.id 
+            SELECT u.username, u.role_id, u.role_changes, u.credits, u.xp, u.last_daily, u.title_id,
+                   u.msg_count, u.notifications_enabled, u.admin_level, r.name as role_name
+            FROM users u
+            LEFT JOIN roles r ON u.role_id = r.id
             WHERE u.user_id = $1
             """,
             user_id
         )
+
+async def get_admin_level(user_id: int) -> int:
+    """Возвращает уровень админа из БД или 0 для обычных пользователей."""
+    async with db_pool.acquire() as conn:
+        level = await conn.fetchval(
+            "SELECT admin_level FROM users WHERE user_id = $1",
+            user_id
+        )
+        return level or 0
 
 
 def normalize_username(value: str) -> str:
@@ -444,7 +544,7 @@ async def site_application(request: web.Request):
         f"ID в базе: <code>{user_id or 'не найден'}</code>\n\n"
         "Привет, я из будущего, снова выбираешь, кого пускать на сайт?"
     )
-    await bot.send_message(ADMIN_USER_ID, text, reply_markup=application_keyboard(token), parse_mode="HTML")
+    await bot.send_message(OWNER_USER_ID, text, reply_markup=application_keyboard(token), parse_mode="HTML")
     return web.json_response({"token": token, "status": "pending"})
 
 
@@ -558,7 +658,7 @@ def render_duel_text(duel_id: str):
     if p1['type'] == 'v2':
         text += f"\n{make_rage_bar(p1)}"
     if p1['type'] == 'gabriel' and p1['hp'] < p1['max_hp'] * 0.4:
-        text += "\n😡 ЯРОСТЬ АКТИВНА"
+        text += "\n💢 ЯРОСТЬ АКТИВНА"
     text += "\n\n"
     
     text += f"🎮 <b>{p2['name']}</b> [{p2['role']}]\n"
@@ -566,7 +666,7 @@ def render_duel_text(duel_id: str):
     if p2['type'] == 'v2':
         text += f"\n{make_rage_bar(p2)}"
     if p2['type'] == 'gabriel' and p2['hp'] < p2['max_hp'] * 0.4:
-        text += "\n😡 ЯРОСТЬ АКТИВНА"
+        text += "\n💢 ЯРОСТЬ АКТИВНА"
     text += "\n\n"
     
     text += f"📜 <b>Лог:</b> {duel['log']}\n\n"
@@ -685,6 +785,8 @@ async def setup_bot_commands(bot: Bot):
         BotCommand(command="title", description="👑 Управление титулами"),
         BotCommand(command="status", description="🤖 Статус картера"),
         BotCommand(command="triggers", description="🗣 Список триггеров"),
+        BotCommand(command="myadminlevel", description="🎛 Твой админский уровень"),
+        BotCommand(command="admins", description="📋 Список админов"),
     ]
     await bot.set_my_commands(commands)
 
@@ -917,11 +1019,12 @@ register_moderation_handlers(
     dp,
     db_pool_getter=get_db_pool,
     bot=bot,
-    admin_usernames=ADMIN_USERNAMES,
+    get_admin_level=get_admin_level,
     shop_data=shop_data,
     refresh_shop_if_needed=refresh_shop_if_needed,
     trigger_cache=TRIGGERS_CACHE,
     parse_time=parse_time,
+    owner_user_id=OWNER_USER_ID,
 )
 
 #ГЕНЕРАТОР ВКЛАДОК ТОПА
@@ -1007,7 +1110,7 @@ async def cb_top_tab(callback: types.CallbackQuery):
 
 
 async def decide_site_application(callback: types.CallbackQuery, status: str):
-    if callback.from_user.id != ADMIN_USER_ID:
+    if callback.from_user.id != OWNER_USER_ID:
         await callback.answer("Эта кнопка только для владельца.", show_alert=True)
         return
 
@@ -1068,11 +1171,11 @@ async def callbacks_num(callback: types.CallbackQuery):
     if user_in_active_duel(user_id):
         await callback.answer("Во время боя роль менять нельзя.", show_alert=True)
         return
-    is_admin = username.lower() in [a.lower() for a in ADMIN_USERNAMES]
+    admin_level = await get_admin_level(user_id)
 
     #роль бога
     if role_id == 999:
-        if user_id != ADMIN_USER_ID:
+        if user_id != OWNER_USER_ID:
             mockery = [
                 "🤡 Хуй тебе. Эта роль только для всемилюбимого Сиаленса.",
                 "⚡️ Твоё смертное тело не выдержит эту силу. Выбери что-то попроще, гой.",
@@ -1092,7 +1195,7 @@ async def callbacks_num(callback: types.CallbackQuery):
         return
 
     if user_data and user_data['role_id'] is not None:
-        if (user_data['role_changes'] or 0) >= 1 and not is_admin:
+        if (user_data['role_changes'] or 0) >= 1 and admin_level < 1:
             await callback.answer("❌ Лимит смен исчерпан!", show_alert=True)
             return
 
