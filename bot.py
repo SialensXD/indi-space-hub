@@ -1,4 +1,4 @@
-фprint("=== СТАРТ БОТА ===", flush=True)
+print("=== СТАРТ БОТА ===", flush=True)
 import os
 import sys
 import logging
