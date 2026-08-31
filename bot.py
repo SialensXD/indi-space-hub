@@ -1,4 +1,4 @@
-print("=== СТАРТ БОТА ===", flush=True)
+фprint("=== СТАРТ БОТА ===", flush=True)
 import os
 import sys
 import logging
@@ -75,7 +75,7 @@ async def load_triggers_cache():
         TRIGGERS_CACHE = {r['phrase']: r['reply_text'] for r in rows}
     logging.info(f"Кэш триггеров загружен: {len(TRIGGERS_CACHE)} шт.")
 
-# СЛОВАРИ ДЛЯ БОЕВКИ
+# СЛОВАРИ ДЛЯ БОЕВК
 active_duels = {}
 duel_invites = {}
 
