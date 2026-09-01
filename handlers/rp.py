@@ -95,7 +95,7 @@ def register_rp_handlers(dp, *, db_pool_getter=None, **kwargs):
             return
         
         target_username = target_mention_input.lstrip("@").lower()
-        target_name = target_username
+        target_name = None
         target_id = None
         
         # Ищем пользователя в БД по username
@@ -103,15 +103,29 @@ def register_rp_handlers(dp, *, db_pool_getter=None, **kwargs):
             try:
                 db_pool = db_pool_getter()
                 async with db_pool.acquire() as conn:
+                    # Сначала ищем с точным совпадением (username уже должен быть в нижнем регистре)
                     user = await conn.fetchrow(
-                        "SELECT user_id, first_name FROM users WHERE LOWER(username) = $1 AND username != ''",
+                        "SELECT user_id, first_name, username FROM users WHERE username = $1 AND username IS NOT NULL AND username != ''",
                         target_username
                     )
+                    
+                    # Если не нашли, ищем игнорируя регистр
+                    if not user:
+                        user = await conn.fetchrow(
+                            "SELECT user_id, first_name, username FROM users WHERE LOWER(COALESCE(username, '')) = $1 AND username IS NOT NULL AND username != ''",
+                            target_username
+                        )
+                    
                     if user:
                         target_id = user['user_id']
-                        target_name = escape(user['first_name'] or target_username)
-            except Exception:
+                        target_name = escape(user['first_name'] or user['username'] or target_username)
+            except Exception as e:
+                # Логируем ошибку но не прерываем выполнение
                 pass
+        
+        # Если не нашли в БД, используем переданное имя
+        if not target_name:
+            target_name = target_username
         
         # Формируем ответ
         if target_id:
@@ -126,7 +140,7 @@ def register_rp_handlers(dp, *, db_pool_getter=None, **kwargs):
             response = (
                 f"{emoji} <a href=\"tg://user?id={author_id}\">{author_name}</a> "
                 f"{action_verb} "
-                f"<b>@{target_username}</b>"
+                f"<b>@{target_name}</b>"
             )
         
         await message.answer(response, parse_mode="HTML")
