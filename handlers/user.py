@@ -166,7 +166,7 @@ def register_user_handlers(
             await message.answer(
                 "❌ <b>ОШИБКА!</b>\n"
                 "━━━━━━━━━━━━━━\n\n"
-                "Тебя нет в базе! Напиши /start в личку бота.",
+                "Тебя нет в бд! Напиши /start в личку бота.",
                 parse_mode="HTML"
             )
             return
@@ -184,19 +184,35 @@ def register_user_handlers(
         
         # Ищем целевого пользователя
         async with db_pool_getter().acquire() as conn:
+            # Ищем по username (игнорируя регистр)
             target = await conn.fetchrow(
-                "SELECT user_id, username FROM users WHERE username = $1",
+                "SELECT user_id, username FROM users WHERE LOWER(username) = $1 AND username != ''",
                 target_username
             )
-        
-        if not target:
-            await message.answer(
-                f"❌ <b>ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН!</b>\n"
-                f"━━━━━━━━━━━━━━\n\n"
-                f"Юзер <b>@{target_username}</b> не в базе.",
-                parse_mode="HTML"
-            )
-            return
+            
+            # Если не найдено, показываем ошибку с подсказкой
+            if not target:
+                # Ищем похожие username для подсказки
+                similar = await conn.fetch(
+                    "SELECT username FROM users WHERE username IS NOT NULL AND username != '' AND LOWER(username) LIKE $1 LIMIT 3",
+                    f"%{target_username}%"
+                )
+                
+                error_msg = (
+                    f"❌ <b>ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН!</b>\n"
+                    f"━━━━━━━━━━━━━━\n\n"
+                    f"Юзер <b>@{target_username}</b> не в базе или не написал /start.\n\n"
+                    f"<b>💡 Совет:</b> Попроси его написать /start в ЛС боту,\n"
+                    f"чтобы его юз появился в системе.\n\n"
+                )
+                
+                if similar:
+                    error_msg += f"<b>🔍 Похожие пользователи:</b>\n"
+                    for u in similar:
+                        error_msg += f"  • @{u['username']}\n"
+                
+                await message.answer(error_msg, parse_mode="HTML")
+                return
         
         target_id = target['user_id']
         
