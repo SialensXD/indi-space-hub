@@ -1028,7 +1028,7 @@ register_moderation_handlers(
     owner_user_id=OWNER_USER_ID,
 )
 
-register_rp_handlers(dp)
+register_rp_handlers(dp, db_pool_getter=get_db_pool)
 
 #ГЕНЕРАТОР ВКЛАДОК ТОПА
 def get_top_keyboard(current_tab="xp"):
