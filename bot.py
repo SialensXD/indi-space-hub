@@ -1102,7 +1102,7 @@ async def welcome_new_members(message: types.Message):
                 VALUES ($1, $2, 100, 0, 0) 
                 ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username
                 """,
-                member.id, member.username or ""
+                member.id, member.username
             )
 
         text = (
@@ -1172,7 +1172,7 @@ async def cb_site_reject(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("role_"))
 async def callbacks_num(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    username = callback.from_user.username or ""
+    username = callback.from_user.username
     parts = callback.data.split("_")
     role_id = int(parts[1])
     owner_id = int(parts[2]) if len(parts) > 2 else None
@@ -1615,9 +1615,16 @@ async def cb_chest_claim(callback: types.CallbackQuery):
         # проверяем, есть ли пользователь в бд
         user_exists = await conn.fetchval("SELECT 1 FROM users WHERE user_id = $1", user_id)
         if not user_exists:
-            await conn.execute("INSERT INTO users (user_id, username, credits, xp, role_changes) VALUES ($1, $2, $3, 0, 0)", user_id, callback.from_user.username or "", reward)
+            await conn.execute("INSERT INTO users (user_id, username, credits, xp, role_changes) VALUES ($1, $2, $3, 0, 0)", user_id, callback.from_user.username, reward)
         else:
-            await conn.execute("UPDATE users SET credits = credits + $1 WHERE user_id = $2", reward, user_id)
+            # Обновляем кредиты и username если он был пустой
+            await conn.execute(
+                """UPDATE users 
+                   SET credits = COALESCE(credits, 0) + $1,
+                       username = CASE WHEN username = '' OR username IS NULL THEN $2 ELSE username END
+                   WHERE user_id = $3""",
+                reward, callback.from_user.username, user_id
+            )
             
     await callback.message.edit_text(
         f"🎁У <b>{user_name}</b> оказалась самая накачанная правая рука и он забрал из сундука <b>{reward} 💰</b>!",
