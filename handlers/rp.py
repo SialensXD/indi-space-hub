@@ -20,7 +20,7 @@ RP_ACTIONS = {
 }
 
 
-def register_rp_handlers(dp, **kwargs):
+def register_rp_handlers(dp, *, db_pool_getter=None, **kwargs):
     """Регистрирует обработчики RP команд."""
     
     @dp.message(Command("rp_list", "rp"))
@@ -94,15 +94,41 @@ def register_rp_handlers(dp, **kwargs):
         if not (target_mention_input.startswith("@") or target_mention_input[0].isalnum()):
             return
         
-        # Если это username, показываем его как есть
-        # (без кликабельной ссылки, так как не знаем ID)
-        target_display = target_mention_input.lstrip("@")
+        target_username = target_mention_input.lstrip("@").lower()
+        target_name = target_username
+        target_id = None
         
-        response = (
-            f"{emoji} <a href=\"tg://user?id={author_id}\">{author_name}</a> "
-            f"{action_verb} "
-            f"<b>@{target_display}</b>"
-        )
+        # Ищем пользователя в БД по username
+        if db_pool_getter:
+            try:
+                db_pool = db_pool_getter()
+                async with db_pool.acquire() as conn:
+                    user = await conn.fetchrow(
+                        "SELECT user_id, first_name FROM users WHERE LOWER(username) = $1 AND username != ''",
+                        target_username
+                    )
+                    if user:
+                        target_id = user['user_id']
+                        target_name = escape(user['first_name'] or target_username)
+            except Exception:
+                pass
+        
+        # Формируем ответ
+        if target_id:
+            # Если нашли в БД, делаем обе ссылки кликабельными
+            response = (
+                f"{emoji} <a href=\"tg://user?id={author_id}\">{author_name}</a> "
+                f"{action_verb} "
+                f"<a href=\"tg://user?id={target_id}\">{target_name}</a>"
+            )
+        else:
+            # Если не нашли, показываем просто имя с болдом
+            response = (
+                f"{emoji} <a href=\"tg://user?id={author_id}\">{author_name}</a> "
+                f"{action_verb} "
+                f"<b>@{target_username}</b>"
+            )
+        
         await message.answer(response, parse_mode="HTML")
 
 
