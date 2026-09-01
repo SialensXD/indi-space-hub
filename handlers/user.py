@@ -34,15 +34,23 @@ def register_user_handlers(
 
         if message.chat.type == "private":
             text = (
-                f"👋 <b>Здрасьте, {message.from_user.first_name}!</b>\n\n"
-                "Я Картер, этакий бот-ассистент. Вот основные команды:\n\n"
-                "🎭 <b>/role</b> — выбрать персонажа для боев\n"
-                "🎁 <b>/daily</b> — забрать ежедневную награду\n"
-                "🏪 <b>/shop</b> — заглянуть в магазин товаров и титулов, там обнова каждые 4 часа\n"
-                "👤 <b>/profile</b> — посмотреть свою статистику\n"
-                "📊 <b>/top</b> — глянуть лидеров чата по разным штукам\n\n"
-                "🔗 <b>/link</b> — получить ссылку на сайт\n\n"
-                "А в чате ответь командой <code>/duel</code> на сообщение соперника, чтобы вызвать его на бой"
+                f"👋 <b>Здрасьте, {message.from_user.first_name}!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Я Картер, этакий бот-ассистент.\n\n"
+                f"<b>🎮 ОСНОВНЫЕ КОМАНДЫ</b>\n\n"
+                f"🎭 <b>/role</b>\n"
+                f"  └ Выбрать персонажа для боев\n\n"
+                f"🎁 <b>/daily</b>\n"
+                f"  └ Забрать ежедневную награду\n\n"
+                f"🏪 <b>/shop</b>\n"
+                f"  └ Магазин товаров и титулов (обнова каждые 4 часа)\n\n"
+                f"👤 <b>/profile</b>\n"
+                f"  └ Посмотреть свою статистику\n\n"
+                f"📊 <b>/top</b>\n"
+                f"  └ Лидеры чата по разным штукам\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🔗 <b>/link</b> — ссылка на сайт\n\n"
+                f"💡 <b>В ЧАТЕ:</b> ответь <code>/duel</code> на сообщение соперника"
             )
         else:
             text = (
@@ -61,12 +69,14 @@ def register_user_handlers(
         uptime -= timedelta(microseconds=uptime.microseconds)
         ping_ms = (datetime.now(timezone.utc) - message.date).total_seconds() * 1000
         text = (
-            "🤖 <b>Статус Картера:</b>\n\n"
-            "🟢 <b>Состояние:</b> Онлайн\n"
-            f"⏱ <b>Аптайм:</b> {uptime}\n"
-            f"🏓 <b>Задержка:</b> ~{int(ping_ms)} мс\n"
-            f"🧠 <b>Триггеров в памяти:</b> {len(trigger_cache)} шт.\n"
-            f"⚔️ <b>Активных дуэлей:</b> {len(active_duels)}"
+            "🤖 <b>СТАТУС КАРТЕРА</b>\n"
+            "━━━━━━━━━━━━━━━━━\n\n"
+            "🟢 Состояние: <b>Онлайн</b>\n\n"
+            f"⏱  Аптайм: <b>{uptime}</b>\n\n"
+            f"🏓 Задержка: <b>~{int(ping_ms)} мс</b>\n\n"
+            f"🧠 Триггеров в памяти: <b>{len(trigger_cache)}</b> шт.\n\n"
+            f"⚔️  Активных дуэлей: <b>{len(active_duels)}</b>\n\n"
+            "━━━━━━━━━━━━━━━━━"
         )
         await message.answer(text, parse_mode="HTML")
 
@@ -94,7 +104,7 @@ def register_user_handlers(
             remaining = timedelta(hours=24) - (now - last_daily)
             hours, remainder = divmod(int(remaining.total_seconds()), 3600)
             minutes, _ = divmod(remainder, 60)
-            await message.answer(f"⏳ Заходи через {hours} ч. {minutes} мин.")
+            await message.answer(f"⏳ <b>Еще не время!</b>\n\nЗаходи через <b>{hours} ч. {minutes} мин.</b>", parse_mode="HTML")
             return
 
         async with db_pool_getter().acquire() as conn:
@@ -109,4 +119,4 @@ def register_user_handlers(
                 now,
                 user_id,
             )
-        await message.answer("🎁 Бонус получен!\n\n+250 💰\n+50 XP ⭐️")
+        await message.answer("🎁 <b>БОНУС ПОЛУЧЕН!</b>\n━━━━━━━━━━━━━━\n\n💰 +250 кредитов\n⭐️ +50 опыта\n\n━━━━━━━━━━━━━━", parse_mode="HTML")
