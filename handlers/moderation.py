@@ -71,8 +71,13 @@ def register_moderation_handlers(
         admin_level = await get_admin_level(message.from_user.id)
         if admin_level < required_level:
             level_names = {1: "младший", 2: "средний", 3: "старший", 4: "владелец"}
+            level_name = level_names.get(required_level, "админ")
             await message.answer(
-                f"❌ Эта команда доступна только для {level_names.get(required_level, 'админа')} админов и выше!"
+                f"❌ <b>ДОСТУП ЗАПРЕЩЕН!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"Эта команда доступна только для\n"
+                f"<b>{level_name} админов</b> и выше!",
+                parse_mode="HTML"
             )
             return False
         return True
@@ -115,10 +120,26 @@ def register_moderation_handlers(
                 await conn.execute("UPDATE users SET warns = 0 WHERE user_id = $1", target_id)
 
             await log_mod_action(target_id, target_name, "SYSTEM", "MUTE (2д)", "Достигнут лимит варнов (4/4)")
-            await message.answer(f"⛓ <b>{target_name}</b> получил 4-й варн и отправляется в мут на 2 дня! У тебя есть время обдумать свое поведение.😘", parse_mode="HTML")
+            await message.answer(
+                f"⛓ <b>АВТОМАТИЧЕСКИЙ МУТ!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"🚨 <b>{target_name}</b> получил 4-й варн\n\n"
+                f"⏱  <b>Длительность:</b> 2 дня\n\n"
+                f"📝 <b>Причина:</b> Превышен лимит предупреждений (4/4)\n\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"<i>У игрока есть время на размышление...</i>",
+                parse_mode="HTML"
+            )
         else:
             # Теперь бот не молчит при выдаче обычного варна
-            await message.answer(f"⚠️ <b>{target_name}</b> получил предупреждение ({warns}/4)!\n📝 Причина: {reason}", parse_mode="HTML")
+            await message.answer(
+                f"⚠️ <b>ВАРН ВЫДАН!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"👤 <b>{target_name}</b>\n"
+                f"⚠️  <b>Варны:</b> {warns}/4\n\n"
+                f"📝 <b>Причина:</b> {reason}",
+                parse_mode="HTML"
+            )
 
     @dp.message(Command("unwarn"))
     async def cmd_unwarn(message: types.Message):
@@ -139,7 +160,14 @@ def register_moderation_handlers(
             return await message.answer("❌ Пользователя нет в бд.")
 
         await log_mod_action(target_id, target_name, admin_name, "UNWARN", reason)
-        await message.answer(f"🕊 <b>{target_name}</b> прощен админом. Один варн снят!\nТекущие варны: {warns}/4\n📝 Причина: {reason}", parse_mode="HTML")
+        await message.answer(
+            f"🕊 <b>ВАРН СНЯТ!</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"👤 <b>{target_name}</b> прощен!\n\n"
+            f"⚠️  <b>Текущие варны:</b> {warns}/4\n\n"
+            f"📝 <b>Причина:</b> {reason}",
+            parse_mode="HTML"
+        )
 
     @dp.message(Command("mute"))
     async def cmd_mute(message: types.Message):
@@ -168,10 +196,22 @@ def register_moderation_handlers(
                 permissions=types.ChatPermissions(can_send_messages=False)
             )
         except Exception as e:
-            return await message.answer(f"❌ Не удалось выдаче мута: {e}")
+            return await message.answer(
+                f"❌ <b>ОШИБКА!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"Не удалось применить мут: {e}",
+                parse_mode="HTML"
+            )
 
         await log_mod_action(target_id, target_name, admin_name, f"MUTE ({time_str})", reason)
-        await message.answer(f"🤐 <b>{target_name}</b> отправлен в мут на {time_str}.\n📝 Причина: {reason}", parse_mode="HTML")
+        await message.answer(
+            f"🤐 <b>МУТ ВЫДАН!</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"👤 <b>{target_name}</b> отправлен в мут\n\n"
+            f"⏱  <b>Длительность:</b> {time_str}\n\n"
+            f"📝 <b>Причина:</b> {reason}",
+            parse_mode="HTML"
+        )
 
         # Дополнительное логирование в модлог
         await log_mod_action(
@@ -203,10 +243,21 @@ def register_moderation_handlers(
                 )
             )
         except Exception as e:
-            return await message.answer(f"❌ Ошибка размута: {e}")
+            return await message.answer(
+                f"❌ <b>ОШИБКА!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"Ошибка размута: {e}",
+                parse_mode="HTML"
+            )
 
         await log_mod_action(target_id, target_name, admin_name, "UNMUTE", reason)
-        await message.answer(f"🔊 <b>{target_name}</b> снова может говорить!\n📝 Причина: {reason}", parse_mode="HTML")
+        await message.answer(
+            f"🔊 <b>МУТ СНЯТ!</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"👤 <b>{target_name}</b> снова может говорить!\n\n"
+            f"📝 <b>Причина:</b> {reason}",
+            parse_mode="HTML"
+        )
 
         # Дополнительное логирование в модлог
         await log_mod_action(
@@ -230,10 +281,21 @@ def register_moderation_handlers(
         try:
             await message.chat.ban(target_id)
         except Exception as e:
-            return await message.answer(f"❌ Ошибка бана: {e}")
+            return await message.answer(
+                f"❌ <b>ОШИБКА!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"Ошибка бана: {e}",
+                parse_mode="HTML"
+            )
 
         await log_mod_action(target_id, target_name, admin_name, "BAN", reason)
-        await message.answer(f"🔨 <b>{target_name}</b> забанен.\n📝 Причина: {reason}", parse_mode="HTML")
+        await message.answer(
+            f"🔨 <b>БАН ВЫДАН!</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"👤 <b>{target_name}</b> забанен из чата\n\n"
+            f"📝 <b>Причина:</b> {reason}",
+            parse_mode="HTML"
+        )
 
         # Дополнительное логирование в модлог
         await log_mod_action(
@@ -256,10 +318,21 @@ def register_moderation_handlers(
         try:
             await message.chat.unban(target_id, only_if_banned=True)
         except Exception as e:
-            return await message.answer(f"❌ Ошибка разбана: {e}")
+            return await message.answer(
+                f"❌ <b>ОШИБКА!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"Ошибка разбана: {e}",
+                parse_mode="HTML"
+            )
 
         await log_mod_action(target_id, target_name, admin_name, "UNBAN", reason)
-        await message.answer(f"🔓 <b>{target_name}</b> разбанен!\n📝 Причина: {reason}", parse_mode="HTML")
+        await message.answer(
+            f"🔓 <b>БАН СНЯТ!</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"👤 <b>{target_name}</b> разбанен!\n\n"
+            f"📝 <b>Причина:</b> {reason}",
+            parse_mode="HTML"
+        )
 
         # Дополнительное логирование в модлог
         await log_mod_action(
@@ -285,15 +358,23 @@ def register_moderation_handlers(
             warns = await conn.fetchval("SELECT warns FROM users WHERE user_id = $1", target_id)
 
         warns = warns or 0
-        text = f"📖 <b>Досье на {target_name}</b>\nТекущие варны: {warns}/4\n\n"
+        text = (
+            f"📖 <b>ДОСЬЕ НА {target_name.upper()}</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"⚠️  <b>Текущие варны:</b> {warns}/4\n\n"
+        )
 
         if not logs:
-            text += "<i>Абсолютно чист. Неужто в нашем аду появился ангел?</i>"
+            text += "<i>Абсолютно чист. Неужто ангел?</i>\n\n"
         else:
+            text += "<b>Последние действия:</b>\n\n"
             for log in logs:
-                dt = log['created_at'].strftime("%m-%d %H:%M")
-                text += f"[{dt}] <b>{log['action']}</b> от @{log['admin_username']}\n└ <i>{log['reason']}</i>\n\n"
+                dt = log['created_at'].strftime("%d.%m %H:%M")
+                text += f"[{dt}] <b>{log['action']}</b>\n"
+                text += f"  👤 От: @{log['admin_username']}\n"
+                text += f"  📝 {log['reason']}\n\n"
 
+        text += f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501"
         await message.answer(text, parse_mode="HTML")
 
     @dp.message(Command("addtrigger"))
@@ -642,7 +723,12 @@ def register_moderation_handlers(
         admin_level = await get_admin_level(user_id)
 
         if admin_level == 0:
-            await message.answer("❌ Ты не админ.")
+            await message.answer(
+                f"❌ <b>НЕ АДМИН!</b>\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"Ты не админ.",
+                parse_mode="HTML"
+            )
             return
 
         level_names = {
@@ -660,10 +746,12 @@ def register_moderation_handlers(
         }
 
         text = (
-            f"🎛 <b>Твой админский уровень:</b>\n\n"
-            f"{level_names[admin_level]}\n\n"
+            f"🎛  <b>ТВОЙ АДМИНСКИЙ УРОВЕНЬ</b>\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+            f"<b>{level_names[admin_level]}</b>\n\n"
             f"📋 <b>Доступные команды:</b>\n"
-            f"{permissions[admin_level]}"
+            f"{permissions[admin_level]}\n\n"
+            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501"
         )
 
         await message.answer(text, parse_mode="HTML")
