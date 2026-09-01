@@ -42,6 +42,8 @@ def register_user_handlers(
                 f"  └ Выбрать персонажа для боев\n\n"
                 f"🎁 <b>/daily</b>\n"
                 f"  └ Забрать ежедневную награду\n\n"
+                f"💸 <b>/give</b>\n"
+                f"  └ Отправить деньги другому юзеру\n\n"
                 f"🏪 <b>/shop</b>\n"
                 f"  └ Магазин товаров и титулов (обнова каждые 4 часа)\n\n"
                 f"👤 <b>/profile</b>\n"
@@ -120,3 +122,112 @@ def register_user_handlers(
                 user_id,
             )
         await message.answer("🎁 <b>БОНУС ПОЛУЧЕН!</b>\n━━━━━━━━━━━━━━\n\n💰 +250 кредитов\n⭐️ +50 опыта\n\n━━━━━━━━━━━━━━", parse_mode="HTML")
+
+    @dp.message(Command("give"))
+    async def cmd_give(message: types.Message):
+        user_id = message.from_user.id
+        args = message.text.split()
+        
+        # Проверка аргументов
+        if len(args) < 3:
+            await message.answer(
+                "❌ <b>ОШИБКА!</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Используй: <code>/give @username сумма</code>\n\n"
+                "Пример: <code>/give bot_user 100</code>",
+                parse_mode="HTML"
+            )
+            return
+        
+        target_username = args[1].lstrip("@").lower()
+        try:
+            amount = int(args[2])
+        except ValueError:
+            await message.answer(
+                "❌ <b>ОШИБКА!</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Сумма должна быть числом!",
+                parse_mode="HTML"
+            )
+            return
+        
+        if amount <= 0:
+            await message.answer(
+                "❌ <b>ОШИБКА!</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Сумма должна быть больше нуля!",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Получаем данные отправителя
+        sender_data = await get_user(user_id)
+        if not sender_data:
+            await message.answer(
+                "❌ <b>ОШИБКА!</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Тебя нет в базе! Напиши /start в личку бота.",
+                parse_mode="HTML"
+            )
+            return
+        
+        sender_balance = sender_data['credits'] or 0
+        if sender_balance < amount:
+            await message.answer(
+                f"❌ <b>НЕДОСТАТОЧНО ДЕНЕГ!</b>\n"
+                f"━━━━━━━━━━━━━━\n\n"
+                f"У тебя есть: <b>{sender_balance} 💰</b>\n"
+                f"Ты хочешь отправить: <b>{amount} 💰</b>",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Ищем целевого пользователя
+        async with db_pool_getter().acquire() as conn:
+            target = await conn.fetchrow(
+                "SELECT user_id, username FROM users WHERE username = $1",
+                target_username
+            )
+        
+        if not target:
+            await message.answer(
+                f"❌ <b>ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН!</b>\n"
+                f"━━━━━━━━━━━━━━\n\n"
+                f"Юзер <b>@{target_username}</b> не в базе.",
+                parse_mode="HTML"
+            )
+            return
+        
+        target_id = target['user_id']
+        
+        # Проверка на самопередачу
+        if target_id == user_id:
+            await message.answer(
+                "😭 <b>Бро...</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Ну ты долбоеб?",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Переводим деньги
+        async with db_pool_getter().acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET credits = COALESCE(credits, 0) - $1 WHERE user_id = $2",
+                amount,
+                user_id
+            )
+            await conn.execute(
+                "UPDATE users SET credits = COALESCE(credits, 0) + $1 WHERE user_id = $2",
+                amount,
+                target_id
+            )
+        
+        await message.answer(
+            f"💸 <b>ПЕРЕВОД ВЫПОЛНЕН!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"💰 Отправлено: <b>{amount} кредитов</b>\n"
+            f"👤 Получатель: <b>@{target['username']}</b>\n"
+            f"💳 Твой баланс: <b>{sender_balance - amount}</b>",
+            parse_mode="HTML"
+        )
