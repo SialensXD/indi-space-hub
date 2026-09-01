@@ -33,6 +33,7 @@ from handlers.shop import register_shop_handlers
 from handlers.moderation import register_moderation_handlers
 from handlers.user import register_user_handlers
 from handlers.casino import register_casino_handlers
+from handlers.rp import register_rp_handlers
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
@@ -1026,6 +1027,8 @@ register_moderation_handlers(
     parse_time=parse_time,
     owner_user_id=OWNER_USER_ID,
 )
+
+register_rp_handlers(dp)
 
 #ГЕНЕРАТОР ВКЛАДОК ТОПА
 def get_top_keyboard(current_tab="xp"):
