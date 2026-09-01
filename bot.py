@@ -75,7 +75,7 @@ async def load_triggers_cache():
         TRIGGERS_CACHE = {r['phrase']: r['reply_text'] for r in rows}
     logging.info(f"Кэш триггеров загружен: {len(TRIGGERS_CACHE)} шт.")
 
-# СЛОВАРИ ДЛЯ БОЕВК
+# СЛОВАРИ ДЛЯ БОЕВКИ
 active_duels = {}
 duel_invites = {}
 
