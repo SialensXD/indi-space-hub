@@ -64,9 +64,16 @@ async function loadStats() {
   try {
     const response = await fetch(apiPath("/api/stats"));
     const data = await readJson(response);
-    table.innerHTML = data.top.length
-      ? data.top.map((player, index) => `<tr><td>${index + 1}</td><td>@${player.username}</td><td>${player.messages}</td><td>${player.xp}</td><td>${player.wins}</td></tr>`).join("")
-      : '<tr><td colspan="5">Пока нет статистики.</td></tr>';
+    if (data.top.length) {
+      const medals = ["🥇", "🥈", "🥉"];
+      table.innerHTML = data.top.map((player, index) => {
+        const medal = medals[index] || `${index + 1}.`;
+        const rank = index < 3 ? `data-rank="${index + 1}"` : "";
+        return `<tr ${rank}><td class="rank-cell">${medal}</td><td class="player-cell">@${player.username}</td><td class="stat-cell">${player.messages}</td><td class="stat-cell">${player.xp}</td><td class="stat-cell">${player.wins}</td></tr>`;
+      }).join("");
+    } else {
+      table.innerHTML = '<tr><td colspan="5">Пока нет статистики.</td></tr>';
+    }
   } catch (error) {
     table.innerHTML = `<tr><td colspan="5">${error.message}</td></tr>`;
   }

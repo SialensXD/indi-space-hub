@@ -167,6 +167,18 @@ th, td { padding: 16px 12px; border-bottom: 1px solid var(--line); text-align: l
 th { color: var(--red); font-size: 10px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; }
 td:first-child { color: var(--red); }
 tr:hover td { color: var(--white); background: rgba(189, 56, 255, .08); }
+tr[data-rank="1"] { background: rgba(255, 215, 0, .06); border-bottom: 1px solid rgba(255, 215, 0, .3); }
+tr[data-rank="1"] td { color: #ffd700; font-weight: 600; }
+tr[data-rank="1"]:hover td { background: rgba(255, 215, 0, .12); }
+tr[data-rank="2"] { background: rgba(192, 192, 192, .06); border-bottom: 1px solid rgba(192, 192, 192, .3); }
+tr[data-rank="2"] td { color: #c0c0c0; font-weight: 600; }
+tr[data-rank="2"]:hover td { background: rgba(192, 192, 192, .12); }
+tr[data-rank="3"] { background: rgba(205, 127, 50, .06); border-bottom: 1px solid rgba(205, 127, 50, .3); }
+tr[data-rank="3"] td { color: #cd7f32; font-weight: 600; }
+tr[data-rank="3"]:hover td { background: rgba(205, 127, 50, .12); }
+.rank-cell { font-size: 18px; text-align: center; width: 40px; }
+.player-cell { font-weight: 500; }
+.stat-cell { font-variant-numeric: tabular-nums; }
 .roles-grid { position: relative; z-index: 20; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 28px; }
 .role-card { position: relative; z-index: 1; min-height: 200px; padding: 23px; border: 1px solid var(--line); background: rgba(255,255,255,.025); cursor: pointer; outline: 0; transition: border-color .3s, transform .3s, background .3s, opacity .3s, filter .3s, box-shadow .3s; }
 .role-card:hover, .role-card:focus-visible { border-color: var(--red); background: rgba(189, 56, 255, .1); transform: translateY(-5px); }

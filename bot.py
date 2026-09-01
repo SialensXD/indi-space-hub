@@ -1054,15 +1054,26 @@ async def render_top(event, tab, is_edit=False):
             ORDER BY {col} DESC LIMIT 10
         """)
     
-    text = f"📊 <b>ТОП-10 ИГРОКОВ ПО {title}</b>\n\n"
+    text = f"<b>📊 ТОП-10 ИГРОКОВ ПО {title}</b>\n"
+    text += "─" * 28 + "\n\n"
+    
     if not users:
         text += "<i>Пока что тут пусто...</i>"
     else:
         for i, u in enumerate(users, 1):
             # медали для первых трёх мест
-            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"<code>{i:2d}.</code>"
             name = u['username'] or "Аноним"
-            text += f"{medal} <b>{name}</b> — {u['val']} {suffix}\n"
+            
+            # выделение для топ-3
+            if i <= 3:
+                text += f"{medal} <b>{name}</b>\n    └─ {u['val']} {suffix}\n"
+            else:
+                text += f"{medal} {name} — {u['val']} {suffix}\n"
+            
+            # разделитель для топ-3
+            if i == 3:
+                text += "\n"
     
     kb = get_top_keyboard(tab)
     
