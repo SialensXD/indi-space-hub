@@ -6,18 +6,17 @@ from aiogram import types, F
 from aiogram.filters import Command
 
 
-# RP команды: действие -> глагол в прошедшем времени
+# RP команды: действие -> (глагол в прошедшем времени, смайлик)
 RP_ACTIONS = {
-    "обнять": "обнял",
-    "поцеловать": "поцеловал",
-    "ударить": "ударил",
-    "пнуть": "пнул",
-    "погладить": "погладил",
-    "щипнуть": "щипнул",
-    "подразнить": "подразнил",
-    "помочь": "помог",
-    "пожать руку": "пожал руку",
-    "высмеять": "высмеял",
+    "обнять": ("обнял", "🫂"),
+    "поцеловать": ("поцеловал", "💋"),
+    "ударить": ("ударил", "👊"),
+    "пнуть": ("пнул", "🦵"),
+    "погладить": ("погладил", "🤚"),
+    "щипнуть": ("больно щипнул", "🤏"),
+    "подразнить": ("подразнил", "😝"),
+    "пожать руку": ("пожал руку", "🤝"),
+    "высмеять": ("насмехается над", "😂"),
 }
 
 
@@ -27,7 +26,7 @@ def register_rp_handlers(dp, **kwargs):
     @dp.message(Command("rp_list", "rp"))
     async def cmd_rp_list(message: types.Message):
         """Показывает список доступных RP действий."""
-        actions_list = "\n".join([f"  • <code>{action}</code> — {verb}" for action, verb in RP_ACTIONS.items()])
+        actions_list = "\n".join([f"  • <code>{action}</code> — {verb[1]} {verb[0]}" for action, verb in RP_ACTIONS.items()])
         
         text = (
             "<b>🎭 ДОСТУПНЫЕ RP ДЕЙСТВИЯ</b>\n"
@@ -63,9 +62,9 @@ def register_rp_handlers(dp, **kwargs):
         if action_name not in RP_ACTIONS:
             return
         
-        action_verb = RP_ACTIONS[action_name]
+        action_verb, emoji = RP_ACTIONS[action_name]
         author_name = escape(message.from_user.first_name)
-        author_mention = f"@{message.from_user.username}" if message.from_user.username else f"#{message.from_user.id}"
+        author_id = message.from_user.id
         
         # Случай 1: ответ на чье-то сообщение
         if message.reply_to_message:
@@ -73,9 +72,14 @@ def register_rp_handlers(dp, **kwargs):
                 return
             
             target_name = escape(message.reply_to_message.from_user.first_name)
-            target_mention = f"@{message.reply_to_message.from_user.username}" if message.reply_to_message.from_user.username else f"#{message.reply_to_message.from_user.id}"
+            target_id = message.reply_to_message.from_user.id
             
-            response = f"{author_mention} {action_verb} {target_mention}"
+            # Формируем HTML с кликабельными ссылками
+            response = (
+                f"{emoji} <a href=\"tg://user?id={author_id}\">{author_name}</a> "
+                f"{action_verb} "
+                f"<a href=\"tg://user?id={target_id}\">{target_name}</a>"
+            )
             await message.reply(response, parse_mode="HTML")
             return
         
@@ -90,6 +94,15 @@ def register_rp_handlers(dp, **kwargs):
         if not (target_mention_input.startswith("@") or target_mention_input[0].isalnum()):
             return
         
-        response = f"{author_mention} {action_verb} {target_mention_input}"
+        # Если это username, показываем его как есть
+        # (без кликабельной ссылки, так как не знаем ID)
+        target_display = target_mention_input.lstrip("@")
+        
+        response = (
+            f"{emoji} <a href=\"tg://user?id={author_id}\">{author_name}</a> "
+            f"{action_verb} "
+            f"<b>@{target_display}</b>"
+        )
         await message.answer(response, parse_mode="HTML")
+
 
